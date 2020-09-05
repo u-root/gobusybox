@@ -238,21 +238,24 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		}
 	}
 
-	// go.mod for the bb binary.
-	//
-	// Add local replace rules for all modules we're compiling.
-	//
-	// This is the only way to locally reference another modules'
-	// repository. Otherwise, go'll try to go online to get the source.
-	//
-	// The module name is something that'll never be online, lest Go
-	// decides to go on the internet.
-	content := `module bb.u-root.com`
-	for _, mpath := range modules {
-		content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
-	}
-	if err := ioutil.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(content), 0755); err != nil {
-		return err
+	// Avoid go.mod in the case of GO111MODULE=(auto|off) if there are no modules.
+	if env.GO111MODULE == "on" || len(modules) > 0 {
+		// go.mod for the bb binary.
+		//
+		// Add local replace rules for all modules we're compiling.
+		//
+		// This is the only way to locally reference another modules'
+		// repository. Otherwise, go'll try to go online to get the source.
+		//
+		// The module name is something that'll never be online, lest Go
+		// decides to go on the internet.
+		content := `module bb.u-root.com`
+		for _, mpath := range modules {
+			content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
+		}
+		if err := ioutil.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(content), 0755); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -320,12 +323,6 @@ func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) erro
 	if len(p.Syntax) != 1 {
 		return fmt.Errorf("bb cmd template is supposed to only have one file")
 	}
-	for _, pkg := range pkgs {
-		// Add side-effect import to bb binary so init registers itself.
-		//
-		// import "pkg"
-		astutil.AddImport(p.Fset, p.Syntax[0], pkg)
-	}
 
 	bbRegisterInit := &ast.FuncDecl{
 		Name: ast.NewIdent("init"),
@@ -337,6 +334,11 @@ func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) erro
 
 	for _, pkg := range pkgs {
 		name := path.Base(pkg)
+		// import mangledpkg "pkg"
+		//
+		// A lot of package names conflict with code in main.go or Go keywords (e.g. init cmd)
+		astutil.AddNamedImport(p.Fset, p.Syntax[0], fmt.Sprintf("mangled%s", name), pkg)
+
 		bbRegisterInit.Body.List = append(bbRegisterInit.Body.List, &ast.ExprStmt{X: &ast.CallExpr{
 			Fun: ast.NewIdent("Register"),
 			Args: []ast.Expr{
@@ -346,9 +348,9 @@ func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) erro
 					Value: strconv.Quote(name),
 				},
 				// init=
-				ast.NewIdent(fmt.Sprintf("%s.Init", name)),
+				ast.NewIdent(fmt.Sprintf("mangled%s.Init", name)),
 				// main=
-				ast.NewIdent(fmt.Sprintf("%s.Main", name)),
+				ast.NewIdent(fmt.Sprintf("mangled%s.Main", name)),
 			},
 		}})
 
@@ -393,6 +395,78 @@ type Package struct {
 	initAssigns map[ast.Expr]ast.Stmt
 }
 
+// We load file system paths differently, because there is a big difference between
+//
+//    go list -json ../../foobar
+//
+// and
+//
+//    (cd ../../foobar && go list -json .)
+//
+// Namely, PWD determines which go.mod to use. We want each
+// package to use its own go.mod, if it has one.
+func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.Package, error) {
+	var absPaths []string
+	for _, fsPath := range filesystemPaths {
+		absPath, err := filepath.Abs(fsPath)
+		if err != nil {
+			return nil, fmt.Errorf("could not find package at %q", fsPath)
+		}
+		absPaths = append(absPaths, absPath)
+	}
+
+	seen := make(map[string]struct{})
+	var allps []*packages.Package
+
+	for _, fsPath := range absPaths {
+		if _, ok := seen[fsPath]; ok {
+			continue
+		}
+		pkgs, err := loadPkgs(env, fsPath, ".")
+		if err != nil {
+			return nil, fmt.Errorf("could not find package %q: %v", fsPath, err)
+		}
+		for _, pkg := range pkgs {
+			if len(pkg.Errors) == 0 && len(pkg.GoFiles) > 0 {
+				dir := filepath.Dir(pkg.GoFiles[0])
+				seen[dir] = struct{}{}
+				allps = append(allps, pkg)
+			}
+		}
+
+		// If other packages share this module, batch 'em
+		for _, pkg := range pkgs {
+			if pkg.Module == nil || len(pkg.Errors) > 0 || len(pkg.GoFiles) == 0 {
+				continue
+			}
+			var batched []string
+			for _, absPath := range absPaths {
+				if _, ok := seen[absPath]; ok {
+					continue
+				}
+				if strings.HasPrefix(absPath, pkg.Module.Dir) {
+					batched = append(batched, absPath)
+				}
+			}
+			if len(batched) == 0 {
+				continue
+			}
+			pkgs, err := loadPkgs(env, pkg.Module.Dir, batched...)
+			if err != nil {
+				return nil, fmt.Errorf("could not find packages in module %v: %v", pkg.Module.Dir, batched)
+			}
+			for _, p := range pkgs {
+				if len(p.Errors) == 0 && len(p.GoFiles) > 0 {
+					dir := filepath.Dir(p.GoFiles[0])
+					seen[dir] = struct{}{}
+					allps = append(allps, p)
+				}
+			}
+		}
+	}
+	return allps, nil
+}
+
 // NewPackages collects package metadata about all named packages.
 //
 // names can either be directory paths or Go import paths.
@@ -419,7 +493,7 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 		ps = append(ps, addPs...)
 	}
 
-	for _, fsPath := range filesystemPaths {
+	/*for _, fsPath := range filesystemPaths {
 		// We load file system paths differently, because there is a big difference between
 		//
 		//    go list -json ../../foobar
@@ -435,9 +509,16 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 			return nil, fmt.Errorf("could not find package %q: %v", fsPath, err)
 		}
 		ps = append(ps, addPs...)
+	}*/
+	pkgs, err := loadFSPackages(env, filesystemPaths)
+	if err != nil {
+		return nil, fmt.Errorf("could not load packages from file system: %v", err)
 	}
+	ps = append(ps, pkgs...)
+
 	var ips []*Package
 	for _, p := range ps {
+		log.Printf("package: %s", p)
 		ips = append(ips, NewPackage(path.Base(p.PkgPath), p))
 	}
 	return ips, nil

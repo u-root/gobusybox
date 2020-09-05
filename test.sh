@@ -11,6 +11,10 @@ GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
 GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
 GO111MODULE=off ./makebb ../../../vendortest/cmd/dmesg ../../../vendortest/cmd/strace
 
+# nested modules
+GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+
 # This has no go.mod!
 cd ../../..
 GO111MODULE=on ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
@@ -34,8 +38,6 @@ GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
 (cd $TMPDIR/u-root && mv vendor vendor2)
 GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
 
-# This should work as is, too.
-GO111MODULE=on ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
 rm -rf $TMPDIR
 
 

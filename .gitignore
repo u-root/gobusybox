@@ -4,3 +4,4 @@ bazel-bin
 bazel-src
 bazel-out
 bazel-testlogs
+/bb2
