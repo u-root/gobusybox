@@ -64,3 +64,6 @@ trap ctrl_c INT
 (cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off go get -u github.com/u-root/u-root)
 GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
 rm -rf $GOPATH_TMPDIR
+
+# try bazel build
+(cd src && bazel build :model_bb)

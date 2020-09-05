@@ -11,6 +11,7 @@ import (
 	"go/token"
 	"go/types"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -76,17 +77,34 @@ func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
 	return rc
 }
 
-type archives []string
+type archives struct {
+	ctxt  build.Context
+	archs []string
+}
 
 func (a archives) findAndOpen(pkg string) io.ReadCloser {
-	archive := fmt.Sprintf("/%s.x", pkg)
-	for _, s := range a {
-		if strings.HasSuffix(s, archive) {
-			ar, err := os.Open(s)
+	suffixes := []string{
+		fmt.Sprintf("/%s.x", pkg),
+		fmt.Sprintf("/%s.a", pkg),
+	}
+	for _, s := range a.archs {
+		if fi, err := os.Stat(s); err == nil && fi.IsDir() {
+			name := fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg)
+			f, err := os.Open(filepath.Join(s, name))
 			if err != nil {
 				return nil
 			}
-			return ar
+			return f
+		} else {
+			for _, suffix := range suffixes {
+				if strings.HasSuffix(s, suffix) {
+					ar, err := os.Open(s)
+					if err != nil {
+						return nil
+					}
+					return ar
+				}
+			}
 		}
 	}
 	return nil
@@ -138,6 +156,7 @@ func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importe
 			break
 		}
 	}
+	log.Printf("archives: %v", archives)
 	return New(ctxt, archives, stdlib), nil
 }
 
@@ -147,8 +166,11 @@ func New(ctxt build.Context, archs []string, stdlib *zip.Reader) *Importer {
 		imports: map[string]*types.Package{
 			"unsafe": types.Unsafe,
 		},
-		fset:     token.NewFileSet(),
-		archives: archives(archs),
+		fset: token.NewFileSet(),
+		archives: archives{
+			ctxt:  ctxt,
+			archs: archs,
+		},
 	}
 	if stdlib != nil {
 		i.stdlib = newZipReader(stdlib, ctxt)
