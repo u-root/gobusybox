@@ -68,4 +68,4 @@ GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb github.com/u-root/
 rm -rf $GOPATH_TMPDIR
 
 # try bazel build
-(cd src && bazel build :model_bb)
+(cd src && bazel build :bb)

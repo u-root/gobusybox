@@ -13,6 +13,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -84,26 +85,24 @@ type archives struct {
 
 func (a archives) findAndOpen(pkg string) io.ReadCloser {
 	suffixes := []string{
-		fmt.Sprintf("/%s.x", pkg),
-		fmt.Sprintf("/%s.a", pkg),
+		fmt.Sprintf("/%s.x", path.Base(pkg)),
+		fmt.Sprintf("/%s.a", path.Base(pkg)),
 	}
 	for _, s := range a.archs {
 		if fi, err := os.Stat(s); err == nil && fi.IsDir() {
 			name := fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg)
 			f, err := os.Open(filepath.Join(s, name))
-			if err != nil {
-				return nil
+			if err == nil {
+				return f
 			}
-			return f
-		} else {
-			for _, suffix := range suffixes {
-				if strings.HasSuffix(s, suffix) {
-					ar, err := os.Open(s)
-					if err != nil {
-						return nil
-					}
-					return ar
+		}
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(s, suffix) {
+				ar, err := os.Open(s)
+				if err != nil {
+					return nil
 				}
+				return ar
 			}
 		}
 	}
@@ -156,7 +155,6 @@ func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importe
 			break
 		}
 	}
-	log.Printf("archives: %v", archives)
 	return New(ctxt, archives, stdlib), nil
 }
 

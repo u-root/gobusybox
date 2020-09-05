@@ -1,0 +1,9 @@
+load("//:build.bzl", "go_busybox_command")
+
+go_busybox_command(
+    name = "dmesg",
+    srcs = ["dmesg.go"],
+    importpath = "github.com/u-root/gobusybox/src/cmd/dmesg",
+    visibility = ["//visibility:public"],
+    deps = ["@org_golang_x_sys//unix"],
+)
