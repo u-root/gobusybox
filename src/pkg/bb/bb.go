@@ -198,7 +198,9 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	// them.
 
 	// Compile bb.
-	env.GOPATH = tmpDir
+	if env.GO111MODULE == "off" {
+		env.GOPATH = tmpDir
+	}
 	if err := env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip}); err != nil {
 		return fmt.Errorf("go build: %v", err)
 	}
