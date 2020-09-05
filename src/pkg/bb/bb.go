@@ -170,6 +170,8 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 
 	bbEnv := env
+	// main.go has no outside dependencies, and the go.mod file has not
+	// been written yet, so turn off Go modules.
 	bbEnv.GO111MODULE = "off"
 	bb, err := NewPackages(bbEnv, bbDir)
 	if err != nil {
@@ -276,7 +278,6 @@ func deps(p *packages.Package, filter func(p *packages.Package) bool) []*package
 
 func collectDeps(env golang.Environ, pkgDir string, p *packages.Package) ([]*packages.Package, string, error) {
 	if p.Module != nil {
-		log.Printf("module: %v", p.Module)
 		if err := os.MkdirAll(filepath.Join(pkgDir, p.Module.Path), 0755); err != nil {
 			return nil, "", err
 		}
@@ -631,11 +632,8 @@ func (p *Package) Rewrite(destDir string) error {
 		Body: &ast.BlockStmt{},
 	}
 
-	log.Printf("pkg: %#v", p.Pkg)
-	log.Printf("syntax: %v", p.Pkg.Syntax)
 	var mainFile *ast.File
 	for _, sourceFile := range p.Pkg.Syntax {
-		log.Printf("file: %v", sourceFile)
 		if hasMainFile := p.rewriteFile(sourceFile); hasMainFile {
 			mainFile = sourceFile
 		}
