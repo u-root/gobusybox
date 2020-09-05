@@ -85,8 +85,12 @@ type archives struct {
 
 func (a archives) findAndOpen(pkg string) io.ReadCloser {
 	suffixes := []string{
+		// bazel
 		fmt.Sprintf("/%s.x", path.Base(pkg)),
 		fmt.Sprintf("/%s.a", path.Base(pkg)),
+		// blaze
+		fmt.Sprintf("/%s.x", pkg),
+		fmt.Sprintf("/%s.a", pkg),
 	}
 	for _, s := range a.archs {
 		if fi, err := os.Stat(s); err == nil && fi.IsDir() {
@@ -155,6 +159,13 @@ func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importe
 			break
 		}
 	}
+
+	// Reverse-sort the archives so that *.x is listed before *.a in
+	// blaze-based archive searching.
+	//
+	// bazel Go rules only pass *.a, which is fine for bazel.
+	// blaze Go rules pass both *.x and *.a, and we need to prefer *.x.
+	sort.Sort(sort.Reverse(sort.StringSlice(archives)))
 	return New(ctxt, archives, stdlib), nil
 }
 
