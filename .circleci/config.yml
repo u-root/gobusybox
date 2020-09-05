@@ -73,6 +73,13 @@ jobs:
             (cd src && go mod tidy && go mod verify)
             (cd modtest && go mod tidy && go mod verify)
             (cd modtest/nestedmod && go mod tidy && go mod verify)
+            git status
+            if [[ -n "$(git status --porcelain vendor)" ]]; then
+              echo 'go.mod/go.sum is out-of-date: run `go mod tidy` and then check in the changes'
+              echo 'If `go mod tidy` results in no changes, make sure you are using the latest relase of Go'
+              git status --porcelain vendor
+              exit 1
+            fi
       - run:
           name: vet
           command: |
