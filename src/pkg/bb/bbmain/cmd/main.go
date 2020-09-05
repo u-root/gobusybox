@@ -204,6 +204,6 @@ func init() {
 		os.Args = os.Args[1:]
 		run()
 	}
-	Register("bb", Noop, ListCmds)
+	Register("bbdiagnose", Noop, ListCmds)
 	RegisterDefault(Noop, m)
 }
