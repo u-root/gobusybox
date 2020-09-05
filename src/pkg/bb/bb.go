@@ -45,6 +45,9 @@ import (
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/u-root/pkg/cp"
+
+	"github.com/rakyll/statik/fs"
+	_ "github.com/u-root/gobusybox/src/pkg/bb/statik"
 )
 
 func checkDuplicate(cmds []string) error {
@@ -148,20 +151,33 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	for _, cmd := range cmds {
 		destination := filepath.Join(pkgDir, cmd.Pkg.PkgPath)
 
-		log.Printf("cmd: %v", cmd.Pkg)
-		if err := cmd.Rewrite(destination, "github.com/u-root/gobusybox/src/pkg/bb/bbmain"); err != nil {
+		if err := cmd.Rewrite(destination); err != nil {
 			return fmt.Errorf("rewriting command %q failed: %v", cmd.Pkg.PkgPath, err)
 		}
 		bbImports = append(bbImports, cmd.Pkg.PkgPath)
 	}
 
-	bb, err := NewPackages(env, "github.com/u-root/gobusybox/src/pkg/bb/bbmain/cmd")
+	statikFS, err := fs.New()
+	if err != nil {
+		return fmt.Errorf("statikfs failure: %v", err)
+	}
+	bbmain, err := fs.ReadFile(statikFS, "/main.go")
+	if err != nil {
+		return fmt.Errorf("statik: %v", err)
+	}
+	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbmain, 0755); err != nil {
+		return err
+	}
+
+	bbEnv := env
+	bbEnv.GO111MODULE = "off"
+	bb, err := NewPackages(bbEnv, bbDir)
 	if err != nil {
 		return err
 	}
 
 	// Collect and write dependencies into pkgDir.
-	if err := dealWithDeps(env, tmpDir, pkgDir, append(cmds, bb[0])); err != nil {
+	if err := dealWithDeps(env, tmpDir, pkgDir, cmds); err != nil {
 		return err
 	}
 
@@ -306,9 +322,38 @@ func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) erro
 	for _, pkg := range pkgs {
 		// Add side-effect import to bb binary so init registers itself.
 		//
-		// import _ "pkg"
-		astutil.AddNamedImport(p.Fset, p.Syntax[0], "_", pkg)
+		// import "pkg"
+		astutil.AddImport(p.Fset, p.Syntax[0], pkg)
 	}
+
+	bbRegisterInit := &ast.FuncDecl{
+		Name: ast.NewIdent("init"),
+		Type: &ast.FuncType{},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{},
+		},
+	}
+
+	for _, pkg := range pkgs {
+		name := path.Base(pkg)
+		bbRegisterInit.Body.List = append(bbRegisterInit.Body.List, &ast.ExprStmt{X: &ast.CallExpr{
+			Fun: ast.NewIdent("Register"),
+			Args: []ast.Expr{
+				// name=
+				&ast.BasicLit{
+					Kind:  token.STRING,
+					Value: strconv.Quote(name),
+				},
+				// init=
+				ast.NewIdent(fmt.Sprintf("%s.Init", name)),
+				// main=
+				ast.NewIdent(fmt.Sprintf("%s.Main", name)),
+			},
+		}})
+
+	}
+
+	p.Syntax[0].Decls = append(p.Syntax[0].Decls, bbRegisterInit)
 
 	return writeFiles(destDir, p.Fset, p.Syntax)
 }
@@ -572,9 +617,8 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 	return nil
 }
 
-// Rewrite rewrites p into destDir as a bb package using bbImportPath for the
-// bb implementation.
-func (p *Package) Rewrite(destDir, bbImportPath string) error {
+// Rewrite rewrites p into destDir as a bb package, creating an Init and Main function.
+func (p *Package) Rewrite(destDir string) error {
 	// This init holds all variable initializations.
 	//
 	// func Init0() {}
@@ -609,39 +653,7 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 		varInit.Body.List = append(varInit.Body.List, a)
 	}
 
-	// import bb "bbImportPath"
-	astutil.AddNamedImport(p.Pkg.Fset, mainFile, "bb", bbImportPath)
-
-	// func init() {
-	//   bb.Register(p.name, Init, Main)
-	// }
-	bbRegisterInit := &ast.FuncDecl{
-		Name: ast.NewIdent("init"),
-		Type: &ast.FuncType{},
-		Body: &ast.BlockStmt{
-			List: []ast.Stmt{
-				&ast.ExprStmt{X: &ast.CallExpr{
-					Fun: ast.NewIdent("bb.Register"),
-					Args: []ast.Expr{
-						// name=
-						&ast.BasicLit{
-							Kind:  token.STRING,
-							Value: strconv.Quote(p.Name),
-						},
-						// init=
-						ast.NewIdent("Init"),
-						// main=
-						ast.NewIdent("Main"),
-					},
-				}},
-			},
-		},
-	}
-
-	// We could add these statements to any of the package files. We choose
-	// the one that contains Main() to guarantee reproducibility of the
-	// same bbsh binary.
-	mainFile.Decls = append(mainFile.Decls, varInit, p.init, bbRegisterInit)
+	mainFile.Decls = append(mainFile.Decls, varInit, p.init)
 
 	return writePkg(p.Pkg, destDir)
 }

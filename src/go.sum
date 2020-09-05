@@ -1,5 +1,8 @@
 github.com/dustin/go-humanize v1.0.0/go.mod h1:HtrtbFcZ19U5GC7JDqmcUSB87Iq5E25KnS6fMYU6eOk=
+github.com/rakyll/statik v0.1.7 h1:OF3QCZUuyPxuGEP7B4ypUa7sB/iHtqOTDYZXGM8KOdQ=
+github.com/rakyll/statik v0.1.7/go.mod h1:AlZONWzMtEnMs7W4e/1LURLiI49pIMmp6V9Unghqrcc=
 github.com/u-root/gobusybox v0.0.0-20191024001447-d47a1f1e219c h1:mn3mvgo3zqHcdsRyx5eEeLRS9s/l/2iDD6a1YVyno08=
+github.com/u-root/gobusybox v0.0.0-20200905035936-cb96b7179ccd h1:PZSjCsqRFntAWU8EzDkZ6IywuN8OGub165I4+LW+oYc=
 github.com/u-root/u-root v1.0.0 h1:3hJy0CG3mXIZtWRE+yrghG/3H0v8L1qEeZBlPr5nS9s=
 github.com/u-root/u-root v6.0.0+incompatible/go.mod h1:RYkpo8pTHrNjW08opNd/U6p/RJE7K0D8fXO0d47+3YY=
 github.com/u-root/u-root v7.0.0+incompatible h1:u+KSS04pSxJGI5E7WE4Bs9+Zd75QjFv+REkjy/aoAc8=
