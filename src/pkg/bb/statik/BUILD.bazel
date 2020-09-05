@@ -1,9 +1,0 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
-
-go_library(
-    name = "statik",
-    srcs = ["statik.go"],
-    importpath = "github.com/u-root/gobusybox/src/pkg/bb/statik",
-    visibility = ["//visibility:public"],
-    deps = ["@com_github_rakyll_statik//fs"],
-)

@@ -45,9 +45,6 @@ import (
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/u-root/pkg/cp"
-
-	"github.com/rakyll/statik/fs"
-	_ "github.com/u-root/gobusybox/src/pkg/bb/statik"
 )
 
 func checkDuplicate(cmds []string) error {
@@ -162,15 +159,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 		bbImports = append(bbImports, cmd.Pkg.PkgPath)
 	}
 
-	statikFS, err := fs.New()
-	if err != nil {
-		return fmt.Errorf("statikfs failure: %v", err)
-	}
-	bbmain, err := fs.ReadFile(statikFS, "/main.go")
-	if err != nil {
-		return fmt.Errorf("statik: %v", err)
-	}
-	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbmain, 0755); err != nil {
+	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0755); err != nil {
 		return err
 	}
 
