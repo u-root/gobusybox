@@ -8,7 +8,6 @@ templates:
     environment:
       - GOPATH: "/go"
       - CGO_ENABLED: 0
-      - GO111MODULE: "off"
 
   gomod-template: &gomod-template
     docker:
@@ -30,7 +29,16 @@ workflows:
     jobs:
       - clean-gopath
       - clean-gomod
-      - bazel-build
+      - clean-makebb
+      - build-gopath:
+          requires:
+            - clean-makebb
+            - clean-gopath
+      - build-gomod:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-bazel
 
 jobs:
   clean-gopath:
@@ -62,6 +70,39 @@ jobs:
           command: |
             go vet ./vendortest/...
 
+  clean-makebb:
+    <<: *gomod-template
+    steps:
+      - checkout
+      - run:
+          name: get statik
+          command: go get github.com/rakyll/statik
+      - run:
+          name: check generated code
+          command: |
+            cd src/pkg/bb
+            go generate
+            git status
+            if [[ -n "$(git status --porcelain .)" ]]; then
+              echo 'Generated statik code is out of date. Run `go get github.com/rakyll/statik && cd src/pkg/bb && go generate` and then check changes in git.'
+              git status --porcelain .
+              exit 1
+            fi
+
+  build-gopath:
+    <<: *gopath-template
+    steps:
+      - checkout
+      - run:
+          name: gobuilds
+          command: ./gobuilds.sh
+
+  build-gomod:
+    <<: *gopath-template
+    steps:
+      - checkout
+      - run:
+          name: gobuilds
 
   clean-gomod:
     <<: *gomod-template
@@ -87,7 +128,7 @@ jobs:
             (cd modtest && go vet ./...)
             (cd modtest/nestedmod && go vet ./...)
 
-  bazel-build:
+  build-bazel:
     <<: *bazel-template
     steps:
       - checkout
@@ -97,3 +138,6 @@ jobs:
       - run:
           name: build everything
           command: cd src && bazel build //...
+      - run:
+          name: test everything
+          command: cd src && bazel test //...
