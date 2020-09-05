@@ -59,7 +59,7 @@ func main() {
 		// Fix it via flags from Skylark?
 		ok, err := c.MatchFile(dir, basename)
 		if ok {
-			gofiles = append(gofiles, basename)
+			gofiles = append(gofiles, path)
 		} else if err != nil {
 			log.Fatal(err)
 		} else {

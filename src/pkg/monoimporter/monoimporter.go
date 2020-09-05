@@ -64,7 +64,7 @@ func thatOneString(ctxt build.Context) string {
 }
 
 func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
-	name := fmt.Sprintf("%s/%s.a", thatOneString(z.ctxt), pkg)
+	name := fmt.Sprintf("%s/%s.x", thatOneString(z.ctxt), pkg)
 	f, ok := z.files[name]
 	if !ok {
 		return nil
@@ -79,7 +79,7 @@ func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
 type archives []string
 
 func (a archives) findAndOpen(pkg string) io.ReadCloser {
-	archive := fmt.Sprintf("/%s.a", pkg)
+	archive := fmt.Sprintf("/%s.x", pkg)
 	for _, s := range a {
 		if strings.HasSuffix(s, archive) {
 			ar, err := os.Open(s)
@@ -120,10 +120,16 @@ type Importer struct {
 //
 // archives refers to directories in which to find compiled Go package object files.
 func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importer, error) {
+	// Some architectures have extra stuff after the GOARCH in the stdlib filename.
+	ctxtWithWildcard := ctxt
+	ctxtWithWildcard.GOARCH += "*"
+
 	var stdlib *zip.Reader
-	want := fmt.Sprintf("%s.a.zip", thatOneString(ctxt))
+	wantPattern := fmt.Sprintf("%s.x.zip", thatOneString(ctxtWithWildcard))
 	for _, dir := range zips {
-		if filepath.Base(dir) == want {
+		if matched, err := filepath.Match(wantPattern, filepath.Base(dir)); err != nil {
+			log.Printf("Error with pattern %q: %v", wantPattern, err)
+		} else if matched {
 			stdlibZ, err := zip.OpenReader(dir)
 			if err != nil {
 				return nil, err
@@ -198,6 +204,11 @@ func Load(pkgPath string, filepaths []string, importer types.Importer) (*package
 
 		// We only need global declarations' types.
 		IgnoreFuncBodies: true,
+	}
+
+	p.TypesInfo = &types.Info{
+		// If you don't make this map before passing TypesInfo to Check, it won't be filled in.
+		Types: make(map[ast.Expr]types.TypeAndValue),
 	}
 	// It's important that p.Syntax be in the same order every time for
 	// p.TypesInfo to be stable.
