@@ -1,6 +1,9 @@
 load("//:build.bzl", "go_busybox_binary")
 
 go_busybox_binary(
-    name = "model_bb",
-    commands = ["//cmd/helloworld"],
+    name = "bb",
+    commands = [
+        "//cmd/helloworld",
+        "//cmd/dmesg",
+    ],
 )
