@@ -1,0 +1,6 @@
+/bb
+/makebb
+bazel-bin
+bazel-src
+bazel-out
+bazel-testlogs
