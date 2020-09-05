@@ -4,7 +4,7 @@
 
 package gopkg
 
-import (
+/*import (
 	"fmt"
 	"os"
 	"path"
@@ -53,14 +53,14 @@ func resolvePackagePath(logger ulog.Logger, env golang.Environ, pkg string) ([]s
 
 	var err error
 	// Def not a filepath, so this must be a glob for Go package paths.
-	if !filepath.IsAbs(pkg) /*&& pkg[0:1] != "./"*/ {
+	if !filepath.IsAbs(pkg) && pkg[0:1] != "./" {
 		var query string
 
 		// Does this maybe contain a glob? See filepath.Match documentation.
 		//
 		// If so, search for "..." in the last component before the
 		// glob shows up. E.g. if
-		// github.com/u-root/u-root/cmds/*/*boot*, query Go for
+		// github.com/u-root/u-root/cmds/*boot*, query Go for
 		// github.com/u-root/u-root/cmds/..., and then use
 		// filepath.Match to narrow it down.
 		if i := strings.IndexAny(pkg, "?*["); i != -1 {
@@ -150,4 +150,4 @@ func ResolvePackagePaths(logger ulog.Logger, env golang.Environ, pkgs []string) 
 		}
 	}
 	return result, nil
-}
+}*/
