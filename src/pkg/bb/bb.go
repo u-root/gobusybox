@@ -145,6 +145,11 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
 
+	if len(cmds) == 0 {
+		return fmt.Errorf("no commands compiled")
+	}
+	log.Printf("commands: %v", cmds)
+
 	// List of packages to import in the real main file.
 	var bbImports []string
 	// Rewrite commands to packages.
@@ -180,7 +185,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 
 	// Collect and write dependencies into pkgDir.
 	if err := dealWithDeps(env, tmpDir, pkgDir, cmds); err != nil {
-		return err
+		return fmt.Errorf("dealing with deps: %v", err)
 	}
 
 	// Create bb main.go.
@@ -192,11 +197,12 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	// dependencies need modules anyway. There's literally no way around
 	// them.
 
-	if env.GO111MODULE == "off" {
-		env.GOPATH = tmpDir
-	}
 	// Compile bb.
-	return env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip})
+	env.GOPATH = tmpDir
+	if err := env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip}); err != nil {
+		return fmt.Errorf("go build: %v", err)
+	}
+	return nil
 }
 
 func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) error {
@@ -232,9 +238,13 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 
 	// Copy local dependency packages into temporary module directories at
 	// tmpDir/src.
+	seenIDs := make(map[string]struct{})
 	for _, p := range localDepPkgs {
-		if err := writePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
-			return err
+		if _, ok := seenIDs[p.ID]; !ok {
+			if err := writePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
+				return fmt.Errorf("writing package %s failed: %v", p, err)
+			}
+			seenIDs[p.ID] = struct{}{}
 		}
 	}
 
@@ -418,6 +428,14 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 	seen := make(map[string]struct{})
 	var allps []*packages.Package
 
+	addPkg := func(p *packages.Package) {
+		if len(p.Errors) == 0 && len(p.GoFiles) > 0 && p.Name == "main" {
+			dir := filepath.Dir(p.GoFiles[0])
+			seen[dir] = struct{}{}
+			allps = append(allps, p)
+		}
+	}
+
 	for _, fsPath := range absPaths {
 		if _, ok := seen[fsPath]; ok {
 			continue
@@ -427,11 +445,7 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 			return nil, fmt.Errorf("could not find package %q: %v", fsPath, err)
 		}
 		for _, pkg := range pkgs {
-			if len(pkg.Errors) == 0 && len(pkg.GoFiles) > 0 {
-				dir := filepath.Dir(pkg.GoFiles[0])
-				seen[dir] = struct{}{}
-				allps = append(allps, pkg)
-			}
+			addPkg(pkg)
 		}
 
 		// If other packages share this module, batch 'em
@@ -456,11 +470,7 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 				return nil, fmt.Errorf("could not find packages in module %v: %v", pkg.Module.Dir, batched)
 			}
 			for _, p := range pkgs {
-				if len(p.Errors) == 0 && len(p.GoFiles) > 0 {
-					dir := filepath.Dir(p.GoFiles[0])
-					seen[dir] = struct{}{}
-					allps = append(allps, p)
-				}
+				addPkg(p)
 			}
 		}
 	}
@@ -486,30 +496,17 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 
 	var ps []*packages.Package
 	if len(goImportPaths) > 0 {
-		addPs, err := loadPkgs(env, "", goImportPaths...)
+		importPkgs, err := loadPkgs(env, "", goImportPaths...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
 		}
-		ps = append(ps, addPs...)
+		for _, p := range importPkgs {
+			if p.Name == "main" {
+				ps = append(ps, p)
+			}
+		}
 	}
 
-	/*for _, fsPath := range filesystemPaths {
-		// We load file system paths differently, because there is a big difference between
-		//
-		//    go list -json ../../foobar
-		//
-		// and
-		//
-		//    (cd ../../foobar && go list -json .)
-		//
-		// Namely, PWD determines which go.mod to use. We want each
-		// package to use its own go.mod, if it has one.
-		addPs, err := loadPkgs(env, fsPath, ".")
-		if err != nil {
-			return nil, fmt.Errorf("could not find package %q: %v", fsPath, err)
-		}
-		ps = append(ps, addPs...)
-	}*/
 	pkgs, err := loadFSPackages(env, filesystemPaths)
 	if err != nil {
 		return nil, fmt.Errorf("could not load packages from file system: %v", err)
@@ -677,9 +674,11 @@ func writePkg(p *packages.Package, destDir string) error {
 		return err
 	}
 
+	log.Printf("package: %p %v %v", p, p.OtherFiles, p)
 	for _, fp := range p.OtherFiles {
+		log.Printf("fp: %v", fp)
 		if err := cp.Copy(fp, filepath.Join(destDir, filepath.Base(fp))); err != nil {
-			return err
+			return fmt.Errorf("copy failed: %v", err)
 		}
 	}
 
