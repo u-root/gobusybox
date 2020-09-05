@@ -11,6 +11,10 @@ GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
 GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
 GO111MODULE=off ./makebb ../../../vendortest/cmd/dmesg ../../../vendortest/cmd/strace
 
+# nested modules
+GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+
 # mix vendor-based cmds with mod-based cmds. only works with GO111MODULE=off.
 GO111MODULE=off ./makebb ../../../vendortest/cmd/dmesg ../../../modtest/cmd/strace
 GO111MODULE=off ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
@@ -27,4 +31,23 @@ GO111MODULE=off ./src/cmd/makebb/makebb modtest/cmd/dmesg vendortest/cmd/strace
 GO111MODULE=off ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
 
 #GO111MODULE=off go get -u github.com/u-root/u-root
-GO111MODULE=off ./src/cmd/makebb/makebb modtest/cmd/dmesg github.com/u-root/u-root/cmds/core/strace
+#GO111MODULE=off ./src/cmd/makebb/makebb modtest/cmd/dmesg github.com/u-root/u-root/cmds/core/strace
+
+TMPDIR=$(mktemp -d)
+
+function ctrl_c() {
+  rm -rf $TMPDIR
+}
+trap ctrl_c INT
+
+(cd $TMPDIR && git clone https://github.com/u-root/u-root)
+
+# Make u-root have modules.
+(cd $TMPDIR/u-root && go mod init github.com/u-root/u-root && go mod vendor)
+GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
+
+# Disarm vendor directory.
+(cd $TMPDIR/u-root && mv vendor vendor2)
+GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
+
+rm -rf $TMPDIR

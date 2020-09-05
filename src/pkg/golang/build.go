@@ -6,8 +6,8 @@
 package golang
 
 import (
-	"bytes"
-	"encoding/json"
+	//	"bytes"
+	//"encoding/json"
 	"fmt"
 	"go/build"
 	"os"
@@ -93,7 +93,7 @@ func (c Environ) Version() (string, error) {
 }
 
 // Find lists all dependencies of the package given by `importPath`.
-func (c Environ) Find(pattern string) ([]*Package, error) {
+/*func (c Environ) Find(pattern string) ([]*Package, error) {
 	// The output of this is almost the same as build.Import, except for
 	// the dependencies.
 	cmd := c.GoCmd("list", "-json", pattern)
@@ -153,7 +153,7 @@ func (c Environ) FindOneCmd(pattern string) (*Package, error) {
 		return nil, fmt.Errorf("pattern %q returned %d packages, wanted one", pattern, len(ps))
 	}
 	return ps[0], nil
-}
+}*/
 
 // Env returns all environment variables for invoking a Go command.
 func (c Environ) Env() []string {
@@ -200,13 +200,13 @@ type BuildOpts struct {
 
 // Build compiles the package given by `importPath`, writing the build object
 // to `binaryPath`.
-func (c Environ) Build(importPath string, binaryPath string, opts BuildOpts) error {
+/*func (c Environ) Build(importPath string, binaryPath string, opts BuildOpts) error {
 	p, err := c.FindOneCmd(importPath)
 	if err != nil {
 		return err
 	}
 	return c.BuildDir(p.Dir, binaryPath, opts)
-}
+}*/
 
 // BuildDir compiles the package in the directory `dirPath`, writing the build
 // object to `binaryPath`.
