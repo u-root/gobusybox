@@ -1,3 +1,7 @@
 /bb
 /bb2
 /makebb
+/bazel-bin
+/bazel-out
+/bazel-src
+/bazel-testlogs

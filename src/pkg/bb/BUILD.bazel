@@ -1,0 +1,27 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "bb",
+    srcs = [
+        "bb.go",
+        "generate.go",
+    ],
+    importpath = "github.com/u-root/gobusybox/src/pkg/bb",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/bb/statik",
+        "//pkg/golang",
+        "@com_github_rakyll_statik//fs",
+        "@com_github_u_root_u_root//pkg/cp",
+        "@org_golang_x_tools//go/ast/astutil",
+        "@org_golang_x_tools//go/packages",
+        "@org_golang_x_tools//imports",
+    ],
+)
+
+go_test(
+    name = "bb_test",
+    srcs = ["bb_test.go"],
+    embed = [":bb"],
+    deps = ["@com_github_u_root_u_root//pkg/golang"],
+)

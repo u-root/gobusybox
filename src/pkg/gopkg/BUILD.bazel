@@ -1,0 +1,12 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "gopkg",
+    srcs = ["uroot.go"],
+    importpath = "github.com/u-root/gobusybox/src/pkg/gopkg",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//pkg/golang",
+        "@com_github_u_root_u_root//pkg/ulog",
+    ],
+)
