@@ -5,3 +5,4 @@ bazel-src
 bazel-out
 bazel-testlogs
 /bb2
+/makebb
