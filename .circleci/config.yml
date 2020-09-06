@@ -81,7 +81,9 @@ jobs:
           name: check generated code
           command: |
             mkdir -p /go/bin
-            GOPATH=/go go install ./src/cmd/embedvar
+            go build ./src/cmd/embedvar
+            cp ./embedvar $GOPATH/bin
+            export PATH=$GOPATH/bin:$PATH
             cd src/pkg/bb
             go generate
             git status
