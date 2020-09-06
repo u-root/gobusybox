@@ -14,6 +14,7 @@ templates:
       - image: circleci/golang:1.13
     working_directory: /go/gobusybox
     environment:
+      - GOPATH: "/go"
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
 
@@ -21,6 +22,8 @@ templates:
     docker:
       - image: l.gcr.io/google/bazel:latest
     working_directory: /go/bazel_gobusybox
+    environment:
+      - GOPATH: "/go"
 
 
 workflows:
@@ -75,16 +78,15 @@ jobs:
     steps:
       - checkout
       - run:
-          name: get statik
-          command: go get github.com/rakyll/statik
-      - run:
           name: check generated code
           command: |
+            mkdir -p /go/bin
+            GOPATH=/go go install ./src/cmd/embedvar
             cd src/pkg/bb
             go generate
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'Generated statik code is out of date. Run `go get github.com/rakyll/statik && cd src/pkg/bb && go generate` and then check changes in git.'
+              echo 'Generated bbmain code is out of date. Run `go install ./src/cmd/embevar && cd src/pkg/bb && go generate` and then check changes in git.'
               git status --porcelain .
               git diff
               exit 1

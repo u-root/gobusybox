@@ -1,22 +1,28 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test", "go_embed_data")
 
 go_library(
     name = "bb",
     srcs = [
         "bb.go",
         "generate.go",
+        ":bbmain",
     ],
     importpath = "github.com/u-root/gobusybox/src/pkg/bb",
     visibility = ["//visibility:public"],
     deps = [
-        "//pkg/bb/statik",
         "//pkg/golang",
-        "@com_github_rakyll_statik//fs",
         "@com_github_u_root_u_root//pkg/cp",
         "@org_golang_x_tools//go/ast/astutil",
         "@org_golang_x_tools//go/packages",
         "@org_golang_x_tools//imports",
     ],
+)
+
+go_embed_data(
+    name = "bbmain",
+    src = "//pkg/bb/bbmain/cmd:main.go",
+    var = "bbMainSource",
+    package = "bb",
 )
 
 go_test(
