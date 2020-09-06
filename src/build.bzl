@@ -1,11 +1,14 @@
 """This module contains macros for building u-root busybox-style Go binaries.
+
 Example usage:
+
   Let's say cmd/ls has an implementation of ls as a Go binary.
   Rather than writing a go_binary rule, we write a similar go_busybox_command
   rule, as seen below. You can use the same keywords as you would for
   go_binary.
   To compile this as a standalone binary not part of busybox, you can use the
   target //foo/bar/cmd/ls just like a go_binary target.
+
   go_busybox_command(
     name = "ls",
     srcs = [
@@ -16,19 +19,16 @@ Example usage:
       "//vendor/github.com/.../humanize",
     ],
   )
+
   Do this for every command you want to include in your busybox binary.
   To create a busybox binary:
-  go_busybox(
+
+  go_busybox_binary(
     name = "bb",
     commands = [
       "//foo/bar/cmd/ls",
       "//foo/bar/cmd/ip",
     ],
-  )
-  To create a CPIO initramfs of the busybox:
-  nerf_initramfs(
-      name = "initramfs",
-      busybox = ":bb",
   )
 """
 
@@ -38,7 +38,7 @@ load("@io_bazel_rules_go//go/private:providers.bzl", "GoArchive", "GoLibrary", "
 GoDepsInfo = provider("transitive_files")
 CommandNamesInfo = provider("cmd_names")
 
-def get_transitive_files(rulectx):
+def _get_transitive_files(rulectx):
     directs = []
     transitives = []
     for d in rulectx.attr.deps:
@@ -51,7 +51,7 @@ def get_transitive_files(rulectx):
 
 def _go_dep_aspect(target, ctx):
     _ = target  # unused.
-    tf = get_transitive_files(ctx.rule)
+    tf = _get_transitive_files(ctx.rule)
     return [GoDepsInfo(transitive_files = tf)]
 
 # An aspect that collects all files produced by every "deps"-listed label in
@@ -59,12 +59,14 @@ def _go_dep_aspect(target, ctx):
 go_dep_aspect = aspect(implementation = _go_dep_aspect)
 
 def _uroot_rewrite_ast(ctx):
-    """
-    _uroot_rewrite_ast is the implementation of uroot_rewrite_ast.
+    """Rewrite one Go command to be a library.
+
     It will take a go_binary's source files and rewrite them to be compatible
     with u-root's busybox mode as a library.
+
     Args:
       ctx: rule context
+
     Returns:
       The set of generated files which can be used with an
       attr.label_list(allow_files=True) (e.g. a go_library's srcs field).
@@ -77,7 +79,7 @@ def _uroot_rewrite_ast(ctx):
     for archive in goc.stdlib.libs:
         args.add("--archive", archive.path)
 
-    inputs = get_transitive_files(ctx)
+    inputs = _get_transitive_files(ctx)
     for f in inputs.to_list():
         args.add("--archive", f.path)
 
@@ -90,7 +92,7 @@ def _uroot_rewrite_ast(ctx):
         # they should be since they're relative to gen.. It's a
         # bit of a hack.
         outf = ctx.actions.declare_file("gen/%s" % f.basename)
-        outputs += [outf]
+        outputs.append(outf)
         if not output_dir:
             output_dir = outf.dirname
 
@@ -161,15 +163,20 @@ uroot_rewrite_ast = go_rule(
 )
 
 def go_busybox_command(name, srcs, importpath, deps = [], **kwargs):
-    """
-    go_busybox_command builds a u-root busybox-native Go package.
+    """go_busybox_command builds a u-root busybox-compatible Go package.
+
+    Defines both a _uroot Go library, and a go_binary so it can be used as a
+    drop in for go_binary.
+
     go_busybox_command rewrites a Go commands' source files to be a Go library,
-    but also provides a target for a native standalone executable called
-    {name}_standalone.
+    but also provides a target for a native standalone executable.
+
     The provided kwargs must work with both go_library and go_binary rules.
+
     Args:
         name: name of the command.
         srcs: set of source files to be compiled by this rule.
+        importpath: Go import path for the package.
         deps: set of dependencies present in the source files.
         **kwargs: kwargs to use with the generated go_library and go_binary rules.
     """
@@ -209,13 +216,14 @@ def go_busybox_command(name, srcs, importpath, deps = [], **kwargs):
     )
 
 def _uroot_make_main_template(ctx):
-    """
-    _uroot_make_main implements the uroot_make_main rule.
+    """_uroot_make_main creates main.go dispatcher for our Go busybox.
+
     It takes a set of go_busybox_command dependencies to be compiled into one
     busybox binary and generates the appropriate main() package.
-    TODO(chrisko): Don't force this to be colocated with the template files.
+
     Args:
         ctx: rule context.
+
     Returns:
         The set of generated Go source files that contain a main() function.
     """
@@ -230,10 +238,10 @@ def _uroot_make_main_template(ctx):
         args.add("--package_file", f.path)
         inputs.append(f)
 
-        f = ctx.actions.declare_file("%s_bbgen/%s" % (ctx.attr.name, f.basename))
-        outputs += [f]
+        outf = ctx.actions.declare_file("%s_bbgen/%s" % (ctx.attr.name, f.basename))
+        outputs.append(outf)
         if not output_dir:
-            output_dir = f.dirname
+            output_dir = outf.dirname
 
     args.add("--dest_dir", output_dir)
 
@@ -281,10 +289,11 @@ uroot_make_main_template = go_rule(
 )
 
 def go_busybox_binary(name, commands = [], **kwargs):
-    """
-    Generates a busybox binary of many Go commands.
+    """Generates a busybox binary of many Go commands.
+
     This generates a busybox target binary :name, which strips all debug
     symbols, and a binary with debug symbols can be obtained using :name_debug.
+
     Args:
       name: binary name.
       commands: commands to include. Must be go_busybox_command macro

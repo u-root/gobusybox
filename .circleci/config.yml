@@ -12,9 +12,8 @@ templates:
   gomod-template: &gomod-template
     docker:
       - image: circleci/golang:1.13
-    working_directory: /go/gobusybox
+    working_directory: /home/circleci/gobusybox
     environment:
-      - GOPATH: "/go"
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
 
@@ -103,11 +102,12 @@ jobs:
           command: ./gobuilds.sh
 
   build-gomod:
-    <<: *gopath-template
+    <<: *gomod-template
     steps:
       - checkout
       - run:
           name: gobuilds
+          command: ./gobuilds.sh
 
   clean-gomod:
     <<: *gomod-template
