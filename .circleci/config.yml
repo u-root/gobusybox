@@ -98,8 +98,8 @@ jobs:
     steps:
       - checkout
       - run:
-          name: gobuilds
-          command: ./gobuilds.sh
+          name: gobuilds-gopath
+          command: ./gobuilds-gopath.sh
 
   build-gomod:
     <<: *gomod-template
