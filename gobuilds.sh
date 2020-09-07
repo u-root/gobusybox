@@ -14,58 +14,43 @@ function testmod1() {
 }
 
 # This uses the go.mod in src/
-GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
-test -f ./bb || exit 1
-rm ./bb
+for GO111MODULE in on auto;
+do
+  GO111MODULE=$GO111MODULE ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
+  test -f ./bb || exit 1
+  rm ./bb
 
-GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace
-test -f ./bb || exit 1
-rm ./bb
+  GO111MODULE=$GO111MODULE ./makebb ../../../test/mod1/cmd/*
+  test -f ./bb || exit 1
+  testmod1
+  rm ./bb
 
-GO111MODULE=on ./makebb ../../../test/mod1/cmd/helloworld ../../../test/mod1/cmd/getppid ../../../test/mod1/cmd/hellowithdep
-test -f ./bb || exit 1
-testmod1
-rm ./bb
-
-GO111MODULE=auto ./makebb ../../../test/mod1/cmd/helloworld ../../../test/mod1/cmd/getppid ../../../test/mod1/cmd/hellowithdep
-test -f ./bb || exit 1
-testmod1
-rm ./bb
-
-# nested modules
-GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/cmd/p9ufs
-test -f ./bb || exit 1
-rm ./bb
-
-GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/cmd/p9ufs
-test -f ./bb || exit 1
-rm ./bb
+  # nested modules
+  GO111MODULE=$GO111MODULE ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/cmd/p9ufs
+  test -f ./bb || exit 1
+  rm ./bb
+done
 
 # Make sure `makebb` works completely out of its own tree: there is no go.mod at
 # the top of the tree that `go` can fall back on.
 cd ../../..
-GO111MODULE=on ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
-test -f ./bb || exit 1
-rm ./bb
 
-GO111MODULE=auto ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
-test -f ./bb || exit 1
-rm ./bb
+for GO111MODULE in on auto;
+do
+  GO111MODULE=$GO111MODULE ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
+  test -f ./bb || exit 1
+  rm ./bb
 
-GO111MODULE=on ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/cmd/p9ufs
-test -f ./bb || exit 1
-rm ./bb
+  GO111MODULE=$GO111MODULE ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/cmd/p9ufs
+  test -f ./bb || exit 1
+  rm ./bb
 
-GO111MODULE=auto ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/cmd/p9ufs
-test -f ./bb || exit 1
-rm ./bb
+  GO111MODULE=$GO111MODULE ./src/cmd/makebb/makebb test/mod1/cmd/*
+  test -f ./bb || exit 1
+  testmod1
+  rm ./bb
 
-GO111MODULE=on ./src/cmd/makebb/makebb test/mod1/cmd/helloworld test/mod1/cmd/getppid test/mod1/cmd/hellowithdep
-test -f ./bb || exit 1
-testmod1
-rm ./bb
-
-GO111MODULE=auto ./src/cmd/makebb/makebb test/mod1/cmd/helloworld test/mod1/cmd/getppid test/mod1/cmd/hellowithdep
-test -f ./bb || exit 1
-testmod1
-rm ./bb
+  GO111MODULE=$GO111MODULE ./src/cmd/makebb/makebb test/mod5/cmd/mod5hello test/mod6/cmd/mod6hello
+  test -f ./bb
+  rm ./bb
+done
