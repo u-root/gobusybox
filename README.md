@@ -1,5 +1,7 @@
 ## Go Busybox
 
+## How It Works
+
 [src/pkg/bb](src/pkg/bb) implements a Go source-to-source transformation on pure
 Go code (no cgo).
 
@@ -74,9 +76,6 @@ package sl // based on the directory name or bazel-rule go_binary name
 import (
   "flag"
   "log"
-
-  // This package holds the global map of commands.
-  "github.com/u-root/u-root/pkg/bb"
 )
 
 // Type has to be inferred through type checking.
@@ -101,26 +100,11 @@ func Main() {
 }
 ```
 
-#### Shortcomings
-
--   If there is already a function `Main` or `InitN` for some `N`, there may be
-    a compilation error.
--   Any packages imported by commands may still have global side-effects
-    affecting other commands. Done properly, we would have to rewrite all
-    non-standard-library packages as well as commands. This has not been
-    necessary to implement so far. It would likely be necessary if two different
-    imported packages register the same flag unconditionally globally.
-
 ## Generated main
-
-The main file can be generated based on any template Go files, but the default
-looks something like the following:
 
 ```go
 import (
   "os"
-
-  "github.com/u-root/u-root/pkg/bb"
 
   mangledsl "github.com/org/repo/cmds/generated/sl"
 )
@@ -146,4 +130,12 @@ func init() {
 }
 ```
 
-The default template will use `argv[1]` if `argv[0]` is not in the map.
+#### Shortcomings
+
+-   If there is already a function `Main` or `InitN` for some `N`, there may be
+    a compilation error.
+-   Any packages imported by commands may still have global side-effects
+    affecting other commands. Done properly, we would have to rewrite all
+    non-standard-library packages as well as commands. This has not been
+    necessary to implement so far. It would likely be necessary if two different
+    imported packages register the same flag unconditionally globally.
