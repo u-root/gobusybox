@@ -198,11 +198,29 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	return nil
 }
 
+// dealWithDeps tries to suss out local files that need to be in the tree.
+//
+// It helps to have read https://golang.org/ref/mod when editing this function.
 func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
+	copyGoMod := func(mod *packages.Module) error {
+		if mod == nil {
+			return nil
+		}
+
+		if err := os.MkdirAll(filepath.Join(pkgDir, mod.Path), 0755); os.IsExist(err) {
+			return nil
+		} else if err != nil {
+			return err
+		}
+
+		// Use the module file for all outside dependencies.
+		return cp.Copy(mod.GoMod, filepath.Join(pkgDir, mod.Path, "go.mod"))
+	}
+
 	// Module-enabled Go programs resolve their dependencies in one of two ways:
 	//
-	// - locally, if the dependency is *in* the module
-	// - remotely, if it is outside of the module
+	// - locally, if the dependency is *in* the module or there is a local replace directive
+	// - remotely, if not local
 	//
 	// I.e. if the module is github.com/u-root/u-root,
 	//
@@ -210,11 +228,14 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	// - remote: github.com/hugelgupf/p9/p9
 	// - also local: a remote module, with a local replace rule
 	//
-	// For remote dependencies, we copy the go.mod into the temporary directory.
+	// For local dependencies, we copy all dependency packages' files over,
+	// as well as their go.mod files.
 	//
-	// For local dependencies, we copy all dependency packages' files over.
+	// Remote dependencies are expected to be resolved from main packages'
+	// go.mod and local dependencies' go.mod files, which all must be in
+	// the tree.
 	var localDepPkgs []*packages.Package
-	var modules []string
+	modules := make(map[string]struct{})
 	for _, p := range mainPkgs {
 		// Find all dependency packages that are *within* module boundaries for this package.
 		//
@@ -223,9 +244,40 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		if err != nil {
 			return false, fmt.Errorf("resolving dependencies for %q failed: %v", p.Pkg.PkgPath, err)
 		}
+
 		localDepPkgs = append(localDepPkgs, localDeps...)
 		if len(modulePath) > 0 {
-			modules = append(modules, modulePath)
+			modules[modulePath] = struct{}{}
+		}
+
+		if err := copyGoMod(p.Pkg.Module); err != nil {
+			return false, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg, err)
+		}
+	}
+
+	// TODO(chrisko): We need to go through mainPkgs Module definitions to
+	// find exclude and replace directives, which only have an effect in
+	// the main module's go.mod, which will be the top-level go.mod we
+	// write.
+	//
+	// mainPkgs module files expect to be "the main module", since those
+	// are where Go compilation would normally occur.
+	//
+	// The top-level go.mod must have copies of the mainPkgs' modules'
+	// replace and exclude directives. If they conflict, we need to have a
+	// legible error message for the user.
+
+	// Copy go.mod files for all local modules (= command modules, and
+	// local dependency modules they depend on).
+	for _, p := range localDepPkgs {
+		// Only replaced modules can be potentially local.
+		if p.Module != nil && p.Module.Replace != nil {
+			if err := copyGoMod(p.Module); err != nil {
+				return false, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
+			}
+
+			// All local modules must be declared in the top-level go.mod
+			modules[p.Module.Path] = struct{}{}
 		}
 	}
 
@@ -253,9 +305,14 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		// The module name is something that'll never be online, lest Go
 		// decides to go on the internet.
 		content := `module bb.u-root.com`
-		for _, mpath := range modules {
+		for mpath := range modules {
 			content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
 		}
+
+		// TODO(chrisko): add other go.mod files' replace and exclude
+		// directives.
+		//
+		// Warn the user if they are potentially incompatible.
 		if err := ioutil.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(content), 0755); err != nil {
 			return false, err
 		}
@@ -284,19 +341,14 @@ func deps(p *packages.Package, filter func(p *packages.Package) bool) []*package
 }
 
 func collectDeps(env golang.Environ, pkgDir string, p *packages.Package) ([]*packages.Package, string, error) {
+	log.Printf("deps: %v, module %v", p, p.Module)
 	if p.Module != nil {
-		if err := os.MkdirAll(filepath.Join(pkgDir, p.Module.Path), 0755); err != nil {
-			return nil, "", err
-		}
-
-		// Use the module file for all outside dependencies.
-		if err := cp.Copy(p.Module.GoMod, filepath.Join(pkgDir, p.Module.Path, "go.mod")); err != nil {
-			return nil, "", err
-		}
-
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
 		dep := deps(p, func(pkg *packages.Package) bool {
+			if pkg.Module != nil && pkg.Module.Replace != nil {
+				return true
+			}
 			// Is this a dependency within the module?
 			return strings.HasPrefix(pkg.ID, p.Module.Path)
 		})
