@@ -37,7 +37,7 @@ ln -s bb strace
 ./bb strace echo "hi"
 ```
 
-### AST Transformation
+### Command Transformation
 
 Principally, the AST transformation moves all global side-effects into callable
 package functions. E.g. `main` becomes `Main`, each `init` becomes `InitN`, and
@@ -100,9 +100,11 @@ func Main() {
 }
 ```
 
-## Generated main
+### Generated main.go
 
 ```go
+package main
+
 import (
   "os"
 
@@ -174,7 +176,7 @@ compiles.
                     └── uio           << copied from u-root
 ```
 
-#### Top-level go.mod
+### Top-level go.mod
 
 The top-level go.mod refers packages to their local copies:
 
@@ -185,7 +187,7 @@ replace github.com/u-root/u-root => ./src/github.com/u-root/u-root
 replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
 ```
 
-#### Shortcomings
+### Shortcomings
 
 -   If there is already a function `Main` or `InitN` for some `N`, there may be
     a compilation error.
