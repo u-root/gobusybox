@@ -441,22 +441,37 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 
 		// If other packages share this module, batch 'em
 		for _, pkg := range pkgs {
-			if pkg.Module == nil || len(pkg.Errors) > 0 || len(pkg.GoFiles) == 0 {
+			if len(pkg.Errors) > 0 || len(pkg.GoFiles) == 0 {
 				continue
 			}
 			var batched []string
-			for _, absPath := range absPaths {
-				if _, ok := seen[absPath]; ok {
-					continue
-				}
-				if strings.HasPrefix(absPath, pkg.Module.Dir) {
-					batched = append(batched, absPath)
+			var dir string
+			if pkg.Module == nil {
+				// No module? We're doing vendored compilation,
+				// and we can just query them all at once.
+				batched = absPaths
+				dir = "."
+			} else {
+				dir = pkg.Module.Dir
+				// We can query packages that are *likely* in
+				// the same module together.
+				//
+				// TODO(chrisko): just go through every
+				// directory to see if it has a go.mod. Way
+				// easier.
+				for _, absPath := range absPaths {
+					if _, ok := seen[absPath]; ok {
+						continue
+					}
+					if strings.HasPrefix(absPath, pkg.Module.Dir) {
+						batched = append(batched, absPath)
+					}
 				}
 			}
 			if len(batched) == 0 {
 				continue
 			}
-			pkgs, err := loadPkgs(env, pkg.Module.Dir, batched...)
+			pkgs, err := loadPkgs(env, dir, batched...)
 			if err != nil {
 				return nil, fmt.Errorf("could not find packages in module %v: %v", pkg.Module.Dir, batched)
 			}
