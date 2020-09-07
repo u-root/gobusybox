@@ -32,6 +32,7 @@ workflows:
       - clean-gopath
       - clean-gomod
       - clean-makebb
+      - clean-bazel
       - build-gopath:
           requires:
             - clean-makebb
@@ -40,7 +41,9 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
-      - build-bazel
+      - build-bazel:
+          requires:
+            - clean-bazel
 
 jobs:
   clean-gopath:
@@ -132,6 +135,21 @@ jobs:
             (cd src && go vet ./...)
             (cd modtest && go vet ./...)
             (cd modtest/nestedmod && go vet ./...)
+
+  clean-bazel:
+    <<: *bazel-template
+    steps:
+      - checkout
+      - run:
+          name: run gazelle
+          command: |
+            cd src && bazel run //:gazelle
+            git status
+            if [[ -n "$(git status --porcelain src)" ]]; then
+              echo 'BUILD files are out-of-date: run `cd src && bazel run //:gazelle` and then check in the changes'
+              git status --porcelain src
+              exit 1
+            fi
 
   build-bazel:
     <<: *bazel-template

@@ -1,4 +1,5 @@
 load("//:build.bzl", "go_busybox_binary")
+load("@bazel_gazelle//:def.bzl", "gazelle")
 
 # gazelle:prefix github.com/u-root/gobusybox/src
 # gazelle:go_naming_convention import
@@ -9,4 +10,8 @@ go_busybox_binary(
         "//cmd/helloworld:helloworld_lib",
         "//cmd/dmesg:dmesg_lib",
     ],
+)
+
+gazelle(
+    name = "gazelle",
 )
