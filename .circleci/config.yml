@@ -105,8 +105,17 @@ jobs:
     steps:
       - checkout
       - run:
+          name: go env
+          command: go env
+      - run:
           name: gobuilds-gopath
           command: ./gobuilds-gopath.sh
+      - run:
+          name: build u-root (vendored)
+          command: |
+            (cd src/cmd/makebb && go build)
+            GO111MODULE=off go get github.com/u-root/u-root
+            ./src/cmd/makebb/makebb ../u-root/cmds/*/*
 
   clean-gomod:
     <<: *gomod-template
