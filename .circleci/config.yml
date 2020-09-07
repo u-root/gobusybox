@@ -143,8 +143,8 @@ jobs:
       - run:
           name: gofmt
           command: |
-            (cd src && test -z "$(gofmt -s -l $(find -name '*.go')")
-            (cd modtest && test -z "$(gofmt -s -l $(find -name '*.go')")
+            (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
+            (cd modtest && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
   build-gomod:
     <<: *gomod-template
