@@ -144,7 +144,7 @@ compiles.
 
 ```
 /tmp/bb-$NUM/
-├── go.mod                            << top-level go.mod (see below)
+├── go.mod                            << generated top-level go.mod (see below)
 └── src
     ├── bb
     │   └── main.go                   << generated main.go
@@ -152,28 +152,28 @@ compiles.
         └── u-root
             ├── u-bmc
             │   ├── cmd
-            │   │   ├── fan           << generated package source
-            │   │   ├── login         << generated package source
-            │   │   └── socreset      << generated package source
-            │   ├── go.mod            << copied from u-bmc
+            │   │   ├── fan           << generated command package
+            │   │   ├── login         << generated command package
+            │   │   └── socreset      << generated command package
+            │   ├── go.mod            << remote dependency manifest copied from u-bmc (if module)
             │   └── pkg
-            │       ├── acme          << copied from u-bmc
-            │       ├── aspeed        << copied from u-bmc
-            │       ├── gpiowatcher   << copied from u-bmc
-            │       └── mtd           << copied from u-bmc
+            │       ├── acme          << local dependency copied from u-bmc
+            │       ├── aspeed        << local dependency copied from u-bmc
+            │       ├── gpiowatcher   << local dependency copied from u-bmc
+            │       └── mtd           << local dependency copied from u-bmc
             └── u-root
                 ├── cmds
-                │   └── core          << generated package
-                │       ├── cat       << generated package
-                │       ├── ip        << generated package
-                │       └── ls        << generated package
-                ├── go.mod            << copied from u-root
+                │   └── core          << generated command package
+                │       ├── cat       << generated command package
+                │       ├── ip        << generated command package
+                │       └── ls        << generated command package
+                ├── go.mod            << remote dependency manifest copied from u-root (if module)
                 └── pkg
-                    ├── curl          << copied from u-root
-                    ├── dhclient      << copied from u-root
-                    ├── ip            << copied from u-root
-                    ├── ls            << copied from u-root
-                    └── uio           << copied from u-root
+                    ├── curl          << local dependency copied from u-root
+                    ├── dhclient      << local dependency copied from u-root
+                    ├── ip            << local dependency copied from u-root
+                    ├── ls            << local dependency copied from u-root
+                    └── uio           << local dependency copied from u-root
 ```
 
 ### Top-level go.mod
