@@ -22,11 +22,11 @@ test -f ./bb || exit 1
 rm ./bb
 
 # nested modules
-GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+GO111MODULE=on ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/cmd/p9ufs
 test -f ./bb || exit 1
 rm ./bb
 
-GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/p9ufs
+GO111MODULE=auto ./makebb ../../../modtest/cmd/dmesg ../../../modtest/cmd/strace ../../../modtest/nestedmod/cmd/p9ufs
 test -f ./bb || exit 1
 rm ./bb
 
@@ -41,11 +41,11 @@ GO111MODULE=auto ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace
 test -f ./bb || exit 1
 rm ./bb
 
-GO111MODULE=on ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/p9ufs
+GO111MODULE=on ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/cmd/p9ufs
 test -f ./bb || exit 1
 rm ./bb
 
-GO111MODULE=auto ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/p9ufs
+GO111MODULE=auto ./src/cmd/makebb/makebb modtest/cmd/dmesg modtest/cmd/strace modtest/nestedmod/cmd/p9ufs
 test -f ./bb || exit 1
 rm ./bb
 
