@@ -126,7 +126,10 @@ jobs:
           command: |
             (cd src && go mod tidy && go mod verify)
             (cd test/mod1 && go mod tidy && go mod verify)
-            (cd test/mod2 && go mod tidy && go mod verify)
+            # NOTE: Specifically do NOT tidy test/mod2. It doesn't build on its
+            # own locally due to the mutual dependency; and we do not want
+            # hashes of our own repository in here -- they'll always be out of
+            # date.
             (cd test/mod3 && go mod tidy && go mod verify)
             (cd modtest && go mod tidy && go mod verify)
             (cd modtest/nestedmod && go mod tidy && go mod verify)
