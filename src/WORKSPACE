@@ -33,10 +33,3 @@ go_register_toolchains()
 gazelle_dependencies()
 
 go_embed_data_dependencies()
-
-load("@bazel_gazelle//:def.bzl", "gazelle")
-
-#gazelle(
-#    name = "gazelle",
-#    prefix = "github.com/u-root/gobusybox/src",
-#)
