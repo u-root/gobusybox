@@ -176,7 +176,8 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 
 	// Collect and write dependencies into pkgDir.
-	if err := dealWithDeps(env, tmpDir, pkgDir, cmds); err != nil {
+	hasModules, err := dealWithDeps(env, tmpDir, pkgDir, cmds)
+	if err != nil {
 		return fmt.Errorf("dealing with deps: %v", err)
 	}
 
@@ -190,7 +191,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	// them.
 
 	// Compile bb.
-	if env.GO111MODULE == "off" {
+	if env.GO111MODULE == "off" || !hasModules {
 		env.GOPATH = tmpDir
 	}
 	if err := env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip}); err != nil {
@@ -199,7 +200,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	return nil
 }
 
-func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) error {
+func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
 	// Module-enabled Go programs resolve their dependencies in one of two ways:
 	//
 	// - locally, if the dependency is *in* the module
@@ -222,7 +223,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		// writeDeps also copies the go.mod into the right place.
 		localDeps, modulePath, err := collectDeps(env, pkgDir, p.Pkg)
 		if err != nil {
-			return fmt.Errorf("resolving dependencies for %q failed: %v", p.Pkg.PkgPath, err)
+			return false, fmt.Errorf("resolving dependencies for %q failed: %v", p.Pkg.PkgPath, err)
 		}
 		localDepPkgs = append(localDepPkgs, localDeps...)
 		if len(modulePath) > 0 {
@@ -236,7 +237,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	for _, p := range localDepPkgs {
 		if _, ok := seenIDs[p.ID]; !ok {
 			if err := writePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
-				return fmt.Errorf("writing package %s failed: %v", p, err)
+				return false, fmt.Errorf("writing package %s failed: %v", p, err)
 			}
 			seenIDs[p.ID] = struct{}{}
 		}
@@ -258,10 +259,11 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 			content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
 		}
 		if err := ioutil.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(content), 0755); err != nil {
-			return err
+			return false, err
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // deps recursively iterates through imports.
@@ -361,7 +363,6 @@ func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) erro
 	}
 
 	p.Syntax[0].Decls = append(p.Syntax[0].Decls, bbRegisterInit)
-
 	return writeFiles(destDir, p.Fset, p.Syntax)
 }
 
