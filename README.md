@@ -163,7 +163,7 @@ compiles.
             │       └── mtd           << local dependency copied from u-bmc
             └── u-root
                 ├── cmds
-                │   └── core          << generated command package
+                │   └── core
                 │       ├── cat       << generated command package
                 │       ├── ip        << generated command package
                 │       └── ls        << generated command package
