@@ -164,6 +164,9 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	bbEnv := env
 	// main.go has no outside dependencies, and the go.mod file has not
 	// been written yet, so turn off Go modules.
+	//
+	// TODO(chrisko): just parse AST and fset manually here. It'll be
+	// shared code for this and bazel that way.
 	bbEnv.GO111MODULE = "off"
 	bb, err := NewPackages(bbEnv, bbDir)
 	if err != nil {
@@ -209,10 +212,10 @@ func isReplaceModuleLocal(m *packages.Module) bool {
 	return strings.HasPrefix(m.Path, "./") || strings.HasPrefix(m.Path, "../") || strings.HasPrefix(m.Path, "/")
 }
 
-// dealWithDeps tries to suss out local files that need to be in the tree.
-//
-// It helps to have read https://golang.org/ref/mod when editing this function.
-func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
+// localModules finds all modules that are local, copies their go.mod in the
+// right place, and raises an error if any modules have conflicting replace
+// directives.
+func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 	copyGoMod := func(mod *packages.Module) error {
 		if mod == nil {
 			return nil
@@ -228,6 +231,60 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		return cp.Copy(mod.GoMod, filepath.Join(pkgDir, mod.Path, "go.mod"))
 	}
 
+	type localModule struct {
+		m          *packages.Module
+		provenance string
+	}
+	localModules := make(map[string]*localModule)
+	for _, p := range mainPkgs {
+		if p.Pkg.Module != nil {
+			if _, ok := localModules[p.Pkg.Module.Path]; !ok {
+				localModules[p.Pkg.Module.Path] = &localModule{
+					m:          p.Pkg.Module,
+					provenance: fmt.Sprintf("your request to compile %s from %s", p.Pkg.Module.Path, p.Pkg.Module.Dir),
+				}
+
+				if err := copyGoMod(p.Pkg.Module); err != nil {
+					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
+				}
+			}
+		}
+	}
+
+	for _, p := range mainPkgs {
+		replacedModules := replacedLocalModules(p.Pkg)
+		for modPath, module := range replacedModules {
+			if original, ok := localModules[modPath]; ok {
+				// Is this module different from one that a
+				// previous definition provided?
+				if original.m.Dir != module.Dir {
+					return nil, fmt.Errorf("two conflicting versions of module %s have been requested; one from %s, the other from %s's go.mod",
+						modPath, original.provenance, p.Pkg.Module.Path)
+				}
+			} else {
+				localModules[modPath] = &localModule{
+					m:          module,
+					provenance: fmt.Sprintf("%s's go.mod (%s)", p.Pkg.Module.Path, p.Pkg.Module.GoMod),
+				}
+
+				if err := copyGoMod(module); err != nil {
+					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
+				}
+			}
+		}
+	}
+
+	var modules []string
+	for modPath := range localModules {
+		modules = append(modules, modPath)
+	}
+	return modules, nil
+}
+
+// dealWithDeps tries to suss out local files that need to be in the tree.
+//
+// It helps to have read https://golang.org/ref/mod when editing this function.
+func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
 	// Module-enabled Go programs resolve their dependencies in one of two ways:
 	//
 	// - locally, if the dependency is *in* the module or there is a local replace directive
@@ -245,25 +302,18 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	// Remote dependencies are expected to be resolved from main packages'
 	// go.mod and local dependencies' go.mod files, which all must be in
 	// the tree.
+	localModules, err := localModules(pkgDir, mainPkgs)
+	if err != nil {
+		return false, err
+	}
+
 	var localDepPkgs []*packages.Package
-	modules := make(map[string]struct{})
 	for _, p := range mainPkgs {
 		// Find all dependency packages that are *within* module boundaries for this package.
 		//
 		// writeDeps also copies the go.mod into the right place.
-		localDeps, modulePath, err := collectDeps(env, pkgDir, p.Pkg)
-		if err != nil {
-			return false, fmt.Errorf("resolving dependencies for %q failed: %v", p.Pkg.PkgPath, err)
-		}
-
+		localDeps := collectDeps(p.Pkg, localModules)
 		localDepPkgs = append(localDepPkgs, localDeps...)
-		if len(modulePath) > 0 {
-			modules[modulePath] = struct{}{}
-		}
-
-		if err := copyGoMod(p.Pkg.Module); err != nil {
-			return false, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg, err)
-		}
 	}
 
 	// TODO(chrisko): We need to go through mainPkgs Module definitions to
@@ -280,17 +330,24 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 
 	// Copy go.mod files for all local modules (= command modules, and
 	// local dependency modules they depend on).
-	for _, p := range localDepPkgs {
+	/*for _, p := range localDepPkgs {
 		// Only replaced modules can be potentially local.
 		if p.Module != nil && p.Module.Replace != nil && isReplaceModuleLocal(p.Module.Replace) {
-			if err := copyGoMod(p.Module); err != nil {
-				return false, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
-			}
 
 			// All local modules must be declared in the top-level go.mod
 			modules[p.Module.Path] = struct{}{}
 		}
 	}
+
+	for _, m := range localModules {
+		if p.Pkg.Module != nil {
+			modules[p.Pkg.Module.Path] = struct{}{}
+		}
+
+		if err := copyGoMod(p.Pkg.Module); err != nil {
+			return false, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg, err)
+		}
+	}*/
 
 	// Copy local dependency packages into temporary module directories at
 	// tmpDir/src.
@@ -305,7 +362,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	}
 
 	// Avoid go.mod in the case of GO111MODULE=(auto|off) if there are no modules.
-	if env.GO111MODULE == "on" || len(modules) > 0 {
+	if env.GO111MODULE == "on" || len(localModules) > 0 {
 		// go.mod for the bb binary.
 		//
 		// Add local replace rules for all modules we're compiling.
@@ -316,7 +373,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		// The module name is something that'll never be online, lest Go
 		// decides to go on the internet.
 		content := `module bb.u-root.com`
-		for mpath := range modules {
+		for _, mpath := range localModules {
 			content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
 		}
 
@@ -332,49 +389,63 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	return false, nil
 }
 
-// deps recursively iterates through imports.
+// deps recursively iterates through imports and returns the set of packages
+// for which filter returns true.
 func deps(p *packages.Package, filter func(p *packages.Package) bool) []*packages.Package {
-	imports := make(map[*packages.Package]struct{})
-	for _, pkg := range p.Imports {
+	var pkgs []*packages.Package
+	packages.Visit([]*packages.Package{p}, nil, func(pkg *packages.Package) {
 		if filter(pkg) {
-			imports[pkg] = struct{}{}
+			pkgs = append(pkgs, pkg)
 		}
-		// Non-filtered packages may depend on filtered packages.
-		for _, deppkg := range deps(pkg, filter) {
-			imports[deppkg] = struct{}{}
-		}
-	}
-	var i []*packages.Package
-	for p := range imports {
-		i = append(i, p)
-	}
-	return i
+	})
+	return pkgs
 }
 
-func collectDeps(env golang.Environ, pkgDir string, p *packages.Package) ([]*packages.Package, string, error) {
+func replacedLocalModules(p *packages.Package) map[string]*packages.Module {
+	if p.Module == nil {
+		return nil
+	}
+
+	m := make(map[string]*packages.Module)
+	// Collect all "local" dependency packages that are in `replace`
+	// directives somewhere, to be copied into the temporary directory
+	// structure later.
+	packages.Visit([]*packages.Package{p}, nil, func(pkg *packages.Package) {
+		if pkg.Module != nil && pkg.Module.Replace != nil && isReplaceModuleLocal(pkg.Module.Replace) {
+			m[pkg.Module.Path] = pkg.Module
+		}
+	})
+	return m
+}
+
+func collectDeps(p *packages.Package, localModules []string) []*packages.Package {
 	if p.Module != nil {
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
-		dep := deps(p, func(pkg *packages.Package) bool {
+		return deps(p, func(pkg *packages.Package) bool {
 			if pkg.Module != nil && pkg.Module.Replace != nil && isReplaceModuleLocal(pkg.Module.Replace) {
 				return true
 			}
+
 			// Is this a dependency within the module?
-			return strings.HasPrefix(pkg.ID, p.Module.Path)
+			for _, modulePath := range localModules {
+				if strings.HasPrefix(pkg.PkgPath, modulePath) {
+					return true
+				}
+			}
+			return false
 		})
-		return dep, p.Module.Path, nil
 	}
 
 	// If modules are not enabled, we need a copy of *ALL*
 	// non-standard-library dependencies in the temporary directory.
-	dep := deps(p, func(pkg *packages.Package) bool {
+	return deps(p, func(pkg *packages.Package) bool {
 		// First component of package path contains a "."?
 		//
 		// Poor man's standard library test.
-		firstComp := strings.SplitN(pkg.ID, "/", 2)
+		firstComp := strings.SplitN(pkg.PkgPath, "/", 2)
 		return strings.Contains(firstComp[0], ".")
 	})
-	return dep, "", nil
 }
 
 // CreateBBMainSource creates a bb Go command that imports all given pkgs.
@@ -514,7 +585,8 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 	addPkg := func(p *packages.Package) {
 		if len(p.Errors) > 0 {
 			// TODO(chrisko): should we return an error here instead of warn?
-			log.Printf("Skipping package %v for errors: %v", p, p.Errors)
+			log.Printf("Skipping package %v for errors:", p)
+			packages.PrintErrors([]*packages.Package{p})
 		} else if len(p.GoFiles) == 0 {
 			log.Printf("Skipping package %v because it has no Go files", p)
 		} else if p.Name != "main" {

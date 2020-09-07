@@ -132,6 +132,8 @@ jobs:
             # date.
             (cd test/mod3 && go mod tidy && go mod verify)
             (cd test/mod4 && go mod tidy && go mod verify)
+            (cd test/mod5 && go mod tidy && go mod verify)
+            (cd test/mod6 && go mod tidy && go mod verify)
             (cd modtest && go mod tidy && go mod verify)
             (cd modtest/nestedmod && go mod tidy && go mod verify)
             git status
@@ -149,6 +151,8 @@ jobs:
             # test/mod2 doesn't build on its own due to mutual dependency.
             (cd test/mod3 && go vet ./...)
             (cd test/mod4 && go vet ./...)
+            (cd test/mod5 && go vet ./...)
+            (cd test/mod6 && go vet ./...)
             (cd modtest && go vet ./...)
             (cd modtest/nestedmod && go vet ./...)
       - run:
@@ -169,6 +173,9 @@ jobs:
             (cd test/mod1 && go build ./...)
             # test/mod2 doesn't build on its own due to mutual dependency.
             (cd test/mod3 && go build ./...)
+            (cd test/mod4 && go build ./...)
+            (cd test/mod5 && go build ./...)
+            (cd test/mod6 && go build ./...)
             (cd modtest && go build ./...)
             (cd modtest/nestedmod && go build ./...)
       - run:
