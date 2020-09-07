@@ -141,11 +141,9 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
-
 	if len(cmds) == 0 {
 		return fmt.Errorf("no commands compiled")
 	}
-	log.Printf("commands: %v", cmds)
 
 	// List of packages to import in the real main file.
 	var bbImports []string
@@ -466,7 +464,6 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 	}
 
 	mods, noModulePkgDirs := modules(absPaths)
-	log.Printf("modules: %v", mods)
 
 	for moduleDir, pkgDirs := range mods {
 		pkgs, err := loadFSPkgs(env, moduleDir, pkgDirs...)
@@ -532,7 +529,6 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 
 	var ips []*Package
 	for _, p := range ps {
-		log.Printf("package: %s", p)
 		ips = append(ips, NewPackage(path.Base(p.PkgPath), p))
 	}
 	return ips, nil
@@ -711,9 +707,7 @@ func writePkg(p *packages.Package, destDir string) error {
 		return err
 	}
 
-	log.Printf("package: %p %v %v", p, p.OtherFiles, p)
 	for _, fp := range p.OtherFiles {
-		log.Printf("fp: %v", fp)
 		if err := cp.Copy(fp, filepath.Join(destDir, filepath.Base(fp))); err != nil {
 			return fmt.Errorf("copy failed: %v", err)
 		}
