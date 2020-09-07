@@ -171,6 +171,9 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	if err != nil {
 		return err
 	}
+	if len(bb) == 0 {
+		return fmt.Errorf("bb package not found")
+	}
 
 	// Collect and write dependencies into pkgDir.
 	if err := dealWithDeps(env, tmpDir, pkgDir, cmds); err != nil {
@@ -396,6 +399,33 @@ type Package struct {
 	initAssigns map[ast.Expr]ast.Stmt
 }
 
+// modules returns a list of module directories => directories of packages
+// inside that module as well as packages that have no discernible module.
+//
+// The module for a package is determined by the first parent directory that
+// contains a go.mod.
+func modules(filesystemPaths []string) (map[string][]string, []string) {
+	// list of module directory => directories of packages it likely contains
+	moduledPackages := make(map[string][]string)
+	var noModulePkgs []string
+	for _, fullPath := range filesystemPaths {
+		components := strings.Split(fullPath, "/")
+
+		inModule := false
+		for i := len(components); i >= 1; i-- {
+			prefixPath := "/" + filepath.Join(components[:i]...)
+			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
+				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
+				inModule = true
+			}
+		}
+		if !inModule {
+			noModulePkgs = append(noModulePkgs, fullPath)
+		}
+	}
+	return moduledPackages, noModulePkgs
+}
+
 // We load file system paths differently, because there is a big difference between
 //
 //    go list -json ../../foobar
@@ -420,64 +450,42 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 	var allps []*packages.Package
 
 	addPkg := func(p *packages.Package) {
-		if len(p.Errors) == 0 && len(p.GoFiles) > 0 && p.Name == "main" {
+		if len(p.Errors) > 0 {
+			// TODO(chrisko): should we return an error here instead of warn?
+			log.Printf("Skipping package %v for errors: %v", p, p.Errors)
+		} else if len(p.GoFiles) == 0 {
+			log.Printf("Skipping package %v because it has no Go files", p)
+		} else if p.Name != "main" {
+			log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
+		} else {
 			dir := filepath.Dir(p.GoFiles[0])
 			seen[dir] = struct{}{}
 			allps = append(allps, p)
 		}
 	}
 
-	for _, fsPath := range absPaths {
-		if _, ok := seen[fsPath]; ok {
-			continue
-		}
-		pkgs, err := loadPkgs(env, fsPath, ".")
+	mods, noModulePkgDirs := modules(absPaths)
+	log.Printf("modules: %v", mods)
+
+	for moduleDir, pkgDirs := range mods {
+		pkgs, err := loadFSPkgs(env, moduleDir, pkgDirs...)
 		if err != nil {
-			return nil, fmt.Errorf("could not find package %q: %v", fsPath, err)
+			return nil, fmt.Errorf("could not find packages %v in module %s: %v", pkgDirs, moduleDir, err)
 		}
 		for _, pkg := range pkgs {
 			addPkg(pkg)
 		}
+	}
 
-		// If other packages share this module, batch 'em
-		for _, pkg := range pkgs {
-			if len(pkg.Errors) > 0 || len(pkg.GoFiles) == 0 {
-				continue
-			}
-			var batched []string
-			var dir string
-			if pkg.Module == nil {
-				// No module? We're doing vendored compilation,
-				// and we can just query them all at once.
-				batched = absPaths
-				dir = "."
-			} else {
-				dir = pkg.Module.Dir
-				// We can query packages that are *likely* in
-				// the same module together.
-				//
-				// TODO(chrisko): just go through every
-				// directory to see if it has a go.mod. Way
-				// easier.
-				for _, absPath := range absPaths {
-					if _, ok := seen[absPath]; ok {
-						continue
-					}
-					if strings.HasPrefix(absPath, pkg.Module.Dir) {
-						batched = append(batched, absPath)
-					}
-				}
-			}
-			if len(batched) == 0 {
-				continue
-			}
-			pkgs, err := loadPkgs(env, dir, batched...)
-			if err != nil {
-				return nil, fmt.Errorf("could not find packages in module %v: %v", pkg.Module.Dir, batched)
-			}
-			for _, p := range pkgs {
-				addPkg(p)
-			}
+	if len(noModulePkgDirs) > 0 {
+		// The directory we choose can be any dir that does not have a
+		// go.mod anywhere in its parent tree.
+		vendoredPkgs, err := loadFSPkgs(env, noModulePkgDirs[0], noModulePkgDirs...)
+		if err != nil {
+			return nil, fmt.Errorf("could not find packages %v: %v", noModulePkgDirs, err)
+		}
+		for _, p := range vendoredPkgs {
+			addPkg(p)
 		}
 	}
 	return allps, nil
@@ -509,6 +517,8 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 		for _, p := range importPkgs {
 			if p.Name == "main" {
 				ps = append(ps, p)
+			} else {
+				log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
 			}
 		}
 	}
@@ -525,6 +535,26 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 		ips = append(ips, NewPackage(path.Base(p.PkgPath), p))
 	}
 	return ips, nil
+}
+
+// loadFSPkgs looks up importDirs packages, making the import path relative to
+// `dir`. `go list -json` requires the import path to be relative to the dir
+// when the package is outside of a $GOPATH and there is no go.mod in any parent directory.
+func loadFSPkgs(env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
+	var relImportDirs []string
+	for _, importDir := range importDirs {
+		relImportDir, err := filepath.Rel(dir, importDir)
+		if err != nil {
+			return nil, fmt.Errorf("Go package path %s is not relative to %s: %v", importDir, dir, err)
+		}
+
+		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
+		//
+		// The former looks for cmd/foo in $GOROOT or $GOPATH, while
+		// the latter looks in the relative directory ./cmd/foo.
+		relImportDirs = append(relImportDirs, "./"+relImportDir)
+	}
+	return loadPkgs(env, dir, relImportDirs...)
 }
 
 func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
