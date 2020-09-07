@@ -1,16 +1,15 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
-load("//:build.bzl", "go_busybox_command")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("//:build.bzl", "go_busybox_library")
 
-go_library(
+go_busybox_library(
     name = "helloworld_lib",
     srcs = ["hello.go"],
     importpath = "github.com/u-root/gobusybox/src/cmd/helloworld",
-    visibility = ["//visibility:private"],
+    visibility = ["//visibility:public"],
 )
 
-go_busybox_command(
+go_binary(
     name = "helloworld",
-    srcs = ["hello.go"],
-    importpath = "github.com/u-root/gobusybox/src/cmd/helloworld",
+    embed = [":helloworld_lib"],
     visibility = ["//visibility:public"],
 )

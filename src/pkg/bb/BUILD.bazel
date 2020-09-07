@@ -1,11 +1,11 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test", "go_embed_data")
+load("@io_bazel_rules_go//go:def.bzl", "go_embed_data", "go_library", "go_test")
 
 go_library(
     name = "bb",
     srcs = [
         "bb.go",
+        "bbmain_src.go",
         "generate.go",
-        ":bbmain",
     ],
     importpath = "github.com/u-root/gobusybox/src/pkg/bb",
     visibility = ["//visibility:public"],
@@ -21,13 +21,13 @@ go_library(
 go_embed_data(
     name = "bbmain",
     src = "//pkg/bb/bbmain/cmd:main.go",
-    var = "bbMainSource",
     package = "bb",
+    var = "bbMainSource",
 )
 
 go_test(
     name = "bb_test",
     srcs = ["bb_test.go"],
     embed = [":bb"],
-    deps = ["@com_github_u_root_u_root//pkg/golang"],
+    deps = ["//pkg/golang"],
 )
