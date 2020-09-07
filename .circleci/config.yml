@@ -46,6 +46,27 @@ workflows:
             - clean-bazel
 
 jobs:
+  clean-makebb:
+    <<: *gomod-template
+    steps:
+      - checkout
+      - run:
+          name: check generated code
+          command: |
+            mkdir -p /go/bin
+            go build ./src/cmd/embedvar
+            cp ./embedvar $GOPATH/bin
+            export PATH=$GOPATH/bin:$PATH
+            cd src/pkg/bb
+            go generate
+            git status
+            if [[ -n "$(git status --porcelain .)" ]]; then
+              echo 'Generated bbmain code is out of date. Run `go install ./src/cmd/embevar && cd src/pkg/bb && go generate` and then check changes in git.'
+              git status --porcelain .
+              git diff
+              exit 1
+            fi
+
   clean-gopath:
     <<: *gopath-template
     steps:
@@ -72,29 +93,12 @@ jobs:
             fi
       - run:
           name: vet
-          command: |
-            go vet ./vendortest/...
-
-  clean-makebb:
-    <<: *gomod-template
-    steps:
-      - checkout
+          command: go vet ./vendortest/...
       - run:
-          name: check generated code
+          name: gofmt
           command: |
-            mkdir -p /go/bin
-            go build ./src/cmd/embedvar
-            cp ./embedvar $GOPATH/bin
-            export PATH=$GOPATH/bin:$PATH
-            cd src/pkg/bb
-            go generate
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'Generated bbmain code is out of date. Run `go install ./src/cmd/embevar && cd src/pkg/bb && go generate` and then check changes in git.'
-              git status --porcelain .
-              git diff
-              exit 1
-            fi
+            cd vendortest
+            test -z "$(gofmt -s -l $(find -name '*.go' | grep -v /vendor/))"
 
   build-gopath:
     <<: *gopath-template
@@ -103,14 +107,6 @@ jobs:
       - run:
           name: gobuilds-gopath
           command: ./gobuilds-gopath.sh
-
-  build-gomod:
-    <<: *gomod-template
-    steps:
-      - checkout
-      - run:
-          name: gobuilds
-          command: ./gobuilds.sh
 
   clean-gomod:
     <<: *gomod-template
@@ -135,6 +131,19 @@ jobs:
             (cd src && go vet ./...)
             (cd modtest && go vet ./...)
             (cd modtest/nestedmod && go vet ./...)
+      - run:
+          name: gofmt
+          command: |
+            (cd src && test -z "$(gofmt -s -l $(find -name '*.go')")
+            (cd modtest && test -z "$(gofmt -s -l $(find -name '*.go')")
+
+  build-gomod:
+    <<: *gomod-template
+    steps:
+      - checkout
+      - run:
+          name: gobuilds
+          command: ./gobuilds.sh
 
   clean-bazel:
     <<: *bazel-template
