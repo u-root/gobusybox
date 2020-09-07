@@ -198,6 +198,17 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	return nil
 }
 
+func isReplaceModuleLocal(m *packages.Module) bool {
+	// From "replace directive": https://golang.org/ref/mod#go
+	//
+	//   If the path on the right side of the arrow is an absolute or
+	//   relative path (beginning with ./ or ../), it is interpreted as the
+	//   local file path to the replacement module root directory, which
+	//   must contain a go.mod file. The replacement version must be
+	//   omitted in this case.
+	return strings.HasPrefix(m.Path, "./") || strings.HasPrefix(m.Path, "../") || strings.HasPrefix(m.Path, "/")
+}
+
 // dealWithDeps tries to suss out local files that need to be in the tree.
 //
 // It helps to have read https://golang.org/ref/mod when editing this function.
@@ -271,7 +282,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	// local dependency modules they depend on).
 	for _, p := range localDepPkgs {
 		// Only replaced modules can be potentially local.
-		if p.Module != nil && p.Module.Replace != nil {
+		if p.Module != nil && p.Module.Replace != nil && isReplaceModuleLocal(p.Module.Replace) {
 			if err := copyGoMod(p.Module); err != nil {
 				return false, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
 			}
@@ -346,7 +357,7 @@ func collectDeps(env golang.Environ, pkgDir string, p *packages.Package) ([]*pac
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
 		dep := deps(p, func(pkg *packages.Package) bool {
-			if pkg.Module != nil && pkg.Module.Replace != nil {
+			if pkg.Module != nil && pkg.Module.Replace != nil && isReplaceModuleLocal(pkg.Module.Replace) {
 				return true
 			}
 			// Is this a dependency within the module?
