@@ -106,7 +106,7 @@ func Main() {
 import (
   "os"
 
-  mangledsl "github.com/org/repo/cmds/generated/sl"
+  mangledsl "github.com/org/repo/cmds/sl"
 )
 
 var bbcmds = map[string]...
@@ -128,6 +128,61 @@ func main() {
 func init() {
   Register("sl", mangledsl.Init, mangledsl.Main)
 }
+```
+
+### Directory Structure
+
+All files are written into a temporary directory. All dependencies that can be
+found on the local file system are also written there.
+
+The directory structure we generate resembles a $GOPATH-based source tree, even
+if we are combining module-based Go commands. This just lends code reuse within
+bb: if you remove all the go.mod file, and add in vendored files, the tree still
+compiles.
+
+```
+/tmp/bb-$NUM/
+├── go.mod                            << top-level go.mod (see below)
+└── src
+    ├── bb
+    │   └── main.go                   << generated main.go
+    └── github.com
+        └── u-root
+            ├── u-bmc
+            │   ├── cmd
+            │   │   ├── fan           << generated package source
+            │   │   ├── login         << generated package source
+            │   │   └── socreset      << generated package source
+            │   ├── go.mod            << copied from u-bmc
+            │   └── pkg
+            │       ├── acme          << copied from u-bmc
+            │       ├── aspeed        << copied from u-bmc
+            │       ├── gpiowatcher   << copied from u-bmc
+            │       └── mtd           << copied from u-bmc
+            └── u-root
+                ├── cmds
+                │   └── core          << generated package
+                │       ├── cat       << generated package
+                │       ├── ip        << generated package
+                │       └── ls        << generated package
+                ├── go.mod            << copied from u-root
+                └── pkg
+                    ├── curl          << copied from u-root
+                    ├── dhclient      << copied from u-root
+                    ├── ip            << copied from u-root
+                    ├── ls            << copied from u-root
+                    └── uio           << copied from u-root
+```
+
+#### Top-level go.mod
+
+The top-level go.mod refers packages to their local copies:
+
+```
+package bb.u-root.com # some domain that will never exist
+
+replace github.com/u-root/u-root => ./src/github.com/u-root/u-root
+replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
 ```
 
 #### Shortcomings
