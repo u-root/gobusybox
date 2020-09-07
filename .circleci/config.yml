@@ -145,7 +145,7 @@ jobs:
           command: |
             (cd src && go vet ./...)
             (cd test/mod1 && go vet ./...)
-            (cd test/mod2 && go vet ./...)
+            # test/mod2 doesn't build on its own due to mutual dependency.
             (cd test/mod3 && go vet ./...)
             (cd modtest && go vet ./...)
             (cd modtest/nestedmod && go vet ./...)
@@ -165,7 +165,7 @@ jobs:
           command: |
             (cd src && go build ./...)
             (cd test/mod1 && go build ./...)
-            (cd test/mod2 && go build ./...)
+            # test/mod2 doesn't build on its own due to mutual dependency.
             (cd test/mod3 && go build ./...)
             (cd modtest && go build ./...)
             (cd modtest/nestedmod && go build ./...)
