@@ -401,8 +401,8 @@ type Package struct {
 // modules returns a list of module directories => directories of packages
 // inside that module as well as packages that have no discernible module.
 //
-// The module for a package is determined by the first parent directory that
-// contains a go.mod.
+// The module for a package is determined by the **first** parent directory
+// that contains a go.mod.
 func modules(filesystemPaths []string) (map[string][]string, []string) {
 	// list of module directory => directories of packages it likely contains
 	moduledPackages := make(map[string][]string)
@@ -416,6 +416,7 @@ func modules(filesystemPaths []string) (map[string][]string, []string) {
 			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
 				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
 				inModule = true
+				break
 			}
 		}
 		if !inModule {
