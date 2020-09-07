@@ -51,8 +51,7 @@ func (c Environ) Version() (string, error) {
 	return s[2], nil
 }
 
-// Env returns all environment variables for invoking a Go command.
-func (c Environ) Env() []string {
+func (c Environ) envCommon() []string {
 	var env []string
 	if c.GOARCH != "" {
 		env = append(env, fmt.Sprintf("GOARCH=%s", c.GOARCH))
@@ -72,7 +71,22 @@ func (c Environ) Env() []string {
 
 	if c.GOROOT != "" {
 		env = append(env, fmt.Sprintf("GOROOT=%s", c.GOROOT))
+	}
+	return env
+}
 
+func (c Environ) EnvHuman() []string {
+	env := c.envCommon()
+	if c.GOROOT != "" {
+		env = append(env, fmt.Sprintf("PATH=%s:$PATH", filepath.Join(c.GOROOT, "bin")))
+	}
+	return env
+}
+
+// Env returns all environment variables for invoking a Go command.
+func (c Environ) Env() []string {
+	env := c.envCommon()
+	if c.GOROOT != "" {
 		// If GOROOT is set to a different version of Go, we must
 		// ensure that $GOROOT/bin is also in path to make the "go"
 		// binary available to golang.org/x/tools/packages.
@@ -83,7 +97,7 @@ func (c Environ) Env() []string {
 
 // String returns all environment variables for Go invocations.
 func (c Environ) String() string {
-	return strings.Join(c.Env(), " ")
+	return strings.Join(c.EnvHuman(), " ")
 }
 
 // Optional arguments to Environ.Build.

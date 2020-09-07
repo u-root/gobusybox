@@ -39,6 +39,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/google/goterm/term"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
@@ -201,7 +202,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	return nil
 }
 
-func isReplaceModuleLocal(m *packages.Module) bool {
+func isReplacedModuleLocal(m *packages.Module) bool {
 	// From "replace directive": https://golang.org/ref/mod#go
 	//
 	//   If the path on the right side of the arrow is an absolute or
@@ -252,11 +253,13 @@ func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 	}
 
 	for _, p := range mainPkgs {
-		replacedModules := replacedLocalModules(p.Pkg)
+		replacedModules := locallyReplacedModules(p.Pkg)
 		for modPath, module := range replacedModules {
 			if original, ok := localModules[modPath]; ok {
 				// Is this module different from one that a
 				// previous definition provided?
+				//
+				// This only looks for 2 conflicting *local* module definitions.
 				if original.m.Dir != module.Dir {
 					return nil, fmt.Errorf("two conflicting versions of module %s have been requested; one from %s, the other from %s's go.mod",
 						modPath, original.provenance, p.Pkg.Module.Path)
@@ -274,11 +277,47 @@ func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 		}
 	}
 
+	// Look for conflicts between remote and local modules.
+	//
+	// E.g. if u-bmc depends on u-root, but we are also compiling u-root locally.
+	var conflict bool
+	for _, mainPkg := range mainPkgs {
+		packages.Visit([]*packages.Package{mainPkg.Pkg}, nil, func(p *packages.Package) {
+			if p.Module == nil {
+				return
+			}
+			if l, ok := localModules[p.Module.Path]; ok && l.m.Dir != p.Module.Dir {
+				fmt.Fprintln(os.Stderr, "")
+				log.Printf("Conflicting module dependencies on %s:", p.Module.Path)
+				log.Printf("  %s uses %s", mainPkg.Pkg.Module.Path, moduleIdentifier(p.Module))
+				log.Printf("  %s uses %s", l.provenance, moduleIdentifier(l.m))
+				replacePath, err := filepath.Rel(mainPkg.Pkg.Module.Dir, l.m.Dir)
+				if err != nil {
+					replacePath = l.m.Dir
+				}
+				fmt.Fprintln(os.Stderr, "")
+				log.Printf("%s: add `replace %s => %s` to %s", term.Bold("Suggestion to resolve"), p.Module.Path, replacePath, mainPkg.Pkg.Module.GoMod)
+				fmt.Fprintln(os.Stderr, "")
+				conflict = true
+			}
+		})
+	}
+	if conflict {
+		return nil, fmt.Errorf("conflicting module dependencies found")
+	}
+
 	var modules []string
 	for modPath := range localModules {
 		modules = append(modules, modPath)
 	}
 	return modules, nil
+}
+
+func moduleIdentifier(m *packages.Module) string {
+	if m.Replace != nil && isReplacedModuleLocal(m.Replace) {
+		return fmt.Sprintf("directory %s", m.Replace.Path)
+	}
+	return fmt.Sprintf("version %s", m.Version)
 }
 
 // dealWithDeps tries to suss out local files that need to be in the tree.
@@ -332,7 +371,7 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 	// local dependency modules they depend on).
 	/*for _, p := range localDepPkgs {
 		// Only replaced modules can be potentially local.
-		if p.Module != nil && p.Module.Replace != nil && isReplaceModuleLocal(p.Module.Replace) {
+		if p.Module != nil && p.Module.Replace != nil && isReplacedModuleLocal(p.Module.Replace) {
 
 			// All local modules must be declared in the top-level go.mod
 			modules[p.Module.Path] = struct{}{}
@@ -401,7 +440,7 @@ func deps(p *packages.Package, filter func(p *packages.Package) bool) []*package
 	return pkgs
 }
 
-func replacedLocalModules(p *packages.Package) map[string]*packages.Module {
+func locallyReplacedModules(p *packages.Package) map[string]*packages.Module {
 	if p.Module == nil {
 		return nil
 	}
@@ -411,7 +450,7 @@ func replacedLocalModules(p *packages.Package) map[string]*packages.Module {
 	// directives somewhere, to be copied into the temporary directory
 	// structure later.
 	packages.Visit([]*packages.Package{p}, nil, func(pkg *packages.Package) {
-		if pkg.Module != nil && pkg.Module.Replace != nil && isReplaceModuleLocal(pkg.Module.Replace) {
+		if pkg.Module != nil && pkg.Module.Replace != nil && isReplacedModuleLocal(pkg.Module.Replace) {
 			m[pkg.Module.Path] = pkg.Module
 		}
 	})
@@ -423,7 +462,7 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
 		return deps(p, func(pkg *packages.Package) bool {
-			if pkg.Module != nil && pkg.Module.Replace != nil && isReplaceModuleLocal(pkg.Module.Replace) {
+			if pkg.Module != nil && pkg.Module.Replace != nil && isReplacedModuleLocal(pkg.Module.Replace) {
 				return true
 			}
 
