@@ -352,7 +352,6 @@ func deps(p *packages.Package, filter func(p *packages.Package) bool) []*package
 }
 
 func collectDeps(env golang.Environ, pkgDir string, p *packages.Package) ([]*packages.Package, string, error) {
-	log.Printf("deps: %v, module %v", p, p.Module)
 	if p.Module != nil {
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
