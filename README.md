@@ -144,7 +144,7 @@ compiles.
 
 ```
 /tmp/bb-$NUM/
-├── go.mod                            << generated top-level go.mod (see below)
+├── go.mod                            << generated top-level main module go.mod (see below)
 └── src
     ├── bb
     │   └── main.go                   << generated main.go
@@ -176,6 +176,36 @@ compiles.
                     └── uio           << local dependency copied from u-root
 ```
 
+#### Dependency Resolution
+
+There are two kinds of dependencies we care about: remote go.mod dependencies,
+and local file system dependencies.
+
+For remote go.mod dependencies, we copy over all go.mod files into the
+transformed dependency tree. (See u-root/go.mod and u-bmc/go.mod in the example
+above.)
+
+Local dependencies can be many kinds, and they all need some special attention:
+
+-   non-module builds: dependencies in $GOPATH need to either be copied into the
+    new tree, or we need to set our `GOPATH=/tmp/bb-$NUM:$GOPATH` to find these
+    dependencies.
+-   non-module builds: dependencies in vendor/ need to be copied into the new
+    tree.
+-   module builds: dependencies within a command's own module (e.g.
+    u-root/cmds/core/ls depends on u-root/pkg/ls) need to be copied into the new
+    tree.
+-   module builds: dependencies that have a local file system `replace`
+    directive in their respective main module go.mod need to be copied into the
+    generated top-level main module go.mod, since each commands' respective
+    go.mod is not the main module go.mod anymore. The
+    [module reference](https://golang.org/ref/mod) states that only main module
+    go.mod files' `replace` and `exclude` directives are respected. For example,
+    if u-root/cmds/core/ls is compiled within the u-root tree, u-root/go.mod is
+    the main module go.mod. However, in our generated tree, the `go.mod` at the
+    top is the main module go.mod, so all relevant `replace` and `exclude`
+    directives from both u-root/go.mod and u-bmc/go.mod need to be copied over.
+
 ### Top-level go.mod
 
 The top-level go.mod refers packages to their local copies:
@@ -185,6 +215,11 @@ package bb.u-root.com # some domain that will never exist
 
 replace github.com/u-root/u-root => ./src/github.com/u-root/u-root
 replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
+
+# also, this must have copies of `replace` and `exclude` directives from
+# u-root/go.mod and u-bmc/go.mod
+#
+# if these fundamentally conflict, we cannot build a unified busybox.
 ```
 
 ### Shortcomings
