@@ -1,6 +1,6 @@
 module github.com/u-root/gobusybox/test/diamonddep/mod1
 
-go 1.15
+go 1.13
 
 replace github.com/u-root/gobusybox/test/diamonddep/mod2 => ../mod2
 
