@@ -129,21 +129,11 @@ func (c Environ) BuildDir(dirPath string, binaryPath string, opts BuildOpts) err
 		args = append(args, `-ldflags=-s -w`) // Strip all symbols.
 	}
 
-	v, err := c.Version()
-	if err != nil {
-		return err
-	}
-
 	// Reproducible builds: Trim any GOPATHs out of the executable's
 	// debugging information.
 	//
 	// E.g. Trim /tmp/bb-*/ from /tmp/bb-12345567/src/github.com/...
-	if strings.Contains(v, "go1.13") || strings.Contains(v, "go1.14") || strings.Contains(v, "gotip") {
-		args = append(args, "-trimpath")
-	} else {
-		args = append(args, "-gcflags", fmt.Sprintf("-trimpath=%s", c.GOPATH))
-		args = append(args, "-asmflags", fmt.Sprintf("-trimpath=%s", c.GOPATH))
-	}
+	args = append(args, "-trimpath")
 
 	if len(c.BuildTags) > 0 {
 		args = append(args, []string{"-tags", strings.Join(c.BuildTags, " ")}...)
