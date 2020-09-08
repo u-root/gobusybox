@@ -246,7 +246,7 @@ func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 				}
 
 				if err := copyGoMod(p.Pkg.Module); err != nil {
-					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
+					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg.Module.Path, err)
 				}
 			}
 		}
@@ -271,7 +271,7 @@ func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 				}
 
 				if err := copyGoMod(module); err != nil {
-					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p, err)
+					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg.Module.Path, err)
 				}
 			}
 		}
