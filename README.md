@@ -1,5 +1,51 @@
 ## Go Busybox
 
+## Common Dependency Conflicts
+
+If commands from more than one Go module are combined into a busybox, there are
+a few common dependency pitfalls to be aware of.
+
+`gobusybox` will do its best to print actionable suggestions like this in case
+of conflicts.
+
+Let's say, for example, that [u-root](https://github.com/u-root/u-root)'s
+`cmds/core/*` is being combined into a busybox with
+[u-bmc](https://github.com/u-root/u-bmc)'s `cmd/*`. Both `u-root` and `u-bmc`
+have a go.mod that covers their commands. These are referred to as their
+respective [main module go.mod](https://golang.org/ref/mod); i.e. if you
+compiled `u-root/cmds/core/ls`, the main module go.mod would be `u-root/go.mod`.
+This matter because only the main module's `replace` and `exclude` directives
+are respected, and **gobusybox tries to merge each main module's `replace` and
+`exclude` directives**.
+
+1.  Conflicting major version number dependencies. E.g. if u-root depends on
+    dhcp@v1 and u-bmc depends on dhcp@v2, that may be an irreconcilable
+    conflict.
+
+    Solution: advance u-root's version, or roll u-bmc's version back.
+
+1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
+    are being combined into a busybox with `./makebb ./u-root/cmds/core/\*
+    ./u-bmc/cmd/\*`, but u-bmc depends on u-root@v3 from GitHub.
+
+    Solution: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
+    ../u-root`.
+
+1.  Conflicting local `replace` directives. If `u-root/go.mod` has `replace
+    github.com/insomniacslk/dhcp => ../local/dhcp`, but `u-bmc` still depends on
+    dhcp@v2 from GitHub, that is an irreconcilable conflict.
+
+    Solution: `u-bmc/go.mod` needs `replace github.com/insomniacslk/dhcp =>
+    $samedir/local/dhcp` as well.
+
+1.  Two conflicting local `replace` directives. If `u-root/go.mod` has `replace
+    github.com/insomniacslk/dhcp => ../my/dhcp` and `u-bmc/go.mod` has `replace
+    github.com/insomniacslk/dhcp => ../other/dhcp`, that is an irreconcilable
+    conflict.
+
+    Solution: both go.mod files must point `replace
+    github.com/insomniacslk/dhcp` at the same directory.
+
 ## How It Works
 
 [src/pkg/bb](src/pkg/bb) implements a Go source-to-source transformation on pure
@@ -195,16 +241,12 @@ Local dependencies can be many kinds, and they all need some special attention:
 -   module builds: dependencies within a command's own module (e.g.
     u-root/cmds/core/ls depends on u-root/pkg/ls) need to be copied into the new
     tree.
--   module builds: dependencies that have a local file system `replace`
-    directive in their respective main module go.mod need to be copied into the
-    generated top-level main module go.mod, since each commands' respective
-    go.mod is not the main module go.mod anymore. The
-    [module reference](https://golang.org/ref/mod) states that only main module
-    go.mod files' `replace` and `exclude` directives are respected. For example,
-    if u-root/cmds/core/ls is compiled within the u-root tree, u-root/go.mod is
-    the main module go.mod. However, in our generated tree, the `go.mod` at the
-    top is the main module go.mod, so all relevant `replace` and `exclude`
-    directives from both u-root/go.mod and u-bmc/go.mod need to be copied over.
+-   module builds: `replace`d modules on the local file system. `replace`
+    directives are only respected in
+    [main module go.mod](https://golang.org/ref/mod) files, which would be
+    `u-root/go.mod` and `u-bmc/go.mod` respectively in the above example. The
+    compiled busybox shall respect **all** main modules' `replace` directives,
+    so they must be added to the generated top-level main module go.mod.
 
 ### Top-level go.mod
 
@@ -221,6 +263,10 @@ replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
 #
 # if these fundamentally conflict, we cannot build a unified busybox.
 ```
+
+If `u-root/go.mod` and `u-bmc/go.mod` contained any `replace` or `exclude`
+directives, they also need to be placed in this go.mod, which is the main module
+go.mod for `bb/main.go`.
 
 ### Shortcomings
 
