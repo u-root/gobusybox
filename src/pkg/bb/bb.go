@@ -237,6 +237,7 @@ func localModules(pkgDir string, mainPkgs []*Package) ([]string, error) {
 		provenance string
 	}
 	localModules := make(map[string]*localModule)
+	// Find all top-level modules.
 	for _, p := range mainPkgs {
 		if p.Pkg.Module != nil {
 			if _, ok := localModules[p.Pkg.Module.Path]; !ok {
@@ -618,24 +619,7 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 		absPaths = append(absPaths, absPath)
 	}
 
-	seen := make(map[string]struct{})
 	var allps []*packages.Package
-
-	addPkg := func(p *packages.Package) {
-		if len(p.Errors) > 0 {
-			// TODO(chrisko): should we return an error here instead of warn?
-			log.Printf("Skipping package %v for errors:", p)
-			packages.PrintErrors([]*packages.Package{p})
-		} else if len(p.GoFiles) == 0 {
-			log.Printf("Skipping package %v because it has no Go files", p)
-		} else if p.Name != "main" {
-			log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
-		} else {
-			dir := filepath.Dir(p.GoFiles[0])
-			seen[dir] = struct{}{}
-			allps = append(allps, p)
-		}
-	}
 
 	mods, noModulePkgDirs := modules(absPaths)
 
@@ -645,7 +629,7 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 			return nil, fmt.Errorf("could not find packages %v in module %s: %v", pkgDirs, moduleDir, err)
 		}
 		for _, pkg := range pkgs {
-			addPkg(pkg)
+			allps = addPkg(allps, pkg)
 		}
 	}
 
@@ -657,10 +641,25 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 			return nil, fmt.Errorf("could not find packages %v: %v", noModulePkgDirs, err)
 		}
 		for _, p := range vendoredPkgs {
-			addPkg(p)
+			allps = addPkg(allps, p)
 		}
 	}
 	return allps, nil
+}
+
+func addPkg(plist []*packages.Package, p *packages.Package) []*packages.Package {
+	if len(p.Errors) > 0 {
+		// TODO(chrisko): should we return an error here instead of warn?
+		log.Printf("Skipping package %v for errors:", p)
+		packages.PrintErrors([]*packages.Package{p})
+	} else if len(p.GoFiles) == 0 {
+		log.Printf("Skipping package %v because it has no Go files", p)
+	} else if p.Name != "main" {
+		log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
+	} else {
+		plist = append(plist, p)
+	}
+	return plist
 }
 
 // NewPackages collects package metadata about all named packages.
@@ -687,11 +686,7 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
 		}
 		for _, p := range importPkgs {
-			if p.Name == "main" {
-				ps = append(ps, p)
-			} else {
-				log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
-			}
+			ps = addPkg(ps, p)
 		}
 	}
 
