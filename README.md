@@ -86,7 +86,7 @@ equivalent invocations of `sl` and `cowsay`:
 
 ```sh
 go build src/cmd/makebb
-./makebb modtest/cmd/dmesg modtest/cmd/strace
+./makebb test/nested/cmd/dmesg test/nested/cmd/strace
 
 # Make a symlink dmesg -> bb
 ln -s bb dmesg

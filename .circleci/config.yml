@@ -125,17 +125,18 @@ jobs:
           name: go mod tidy
           command: |
             (cd src && go mod tidy && go mod verify)
-            (cd test/mod1 && go mod tidy && go mod verify)
-            # NOTE: Specifically do NOT tidy test/mod2. It doesn't build on its
-            # own locally due to the mutual dependency; and we do not want
-            # hashes of our own repository in here -- they'll always be out of
-            # date.
-            (cd test/mod3 && go mod tidy && go mod verify)
-            (cd test/mod4 && go mod tidy && go mod verify)
-            (cd test/mod5 && go mod tidy && go mod verify)
-            (cd test/mod6 && go mod tidy && go mod verify)
-            (cd modtest && go mod tidy && go mod verify)
-            (cd modtest/nestedmod && go mod tidy && go mod verify)
+            (cd test/diamonddep/mod1 && go mod tidy && go mod verify)
+            # NOTE: Specifically do NOT tidy test/diamondeps/mod2. It doesn't
+            # build on its own locally due to the mutual dependency; and we do
+            # not want hashes of our own repository in here -- they'll always be
+            # out of date.
+            (cd test/diamonddep/mod3 && go mod tidy && go mod verify)
+            (cd test/normaldeps/mod1 && go mod tidy && go mod verify)
+            (cd test/normaldeps/mod2 && go mod tidy && go mod verify)
+            (cd test/requestconflict/mod5 && go mod tidy && go mod verify)
+            (cd test/requestconflict/mod6 && go mod tidy && go mod verify)
+            (cd test/nested && go mod tidy && go mod verify)
+            (cd test/nested/nestedmod && go mod tidy && go mod verify)
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'go.mod/go.sum is out-of-date: run `go mod tidy` in the right module directories (see git status) and then check in the changes'
@@ -147,19 +148,20 @@ jobs:
           name: vet
           command: |
             (cd src && go vet ./...)
-            (cd test/mod1 && go vet ./...)
-            # test/mod2 doesn't build on its own due to mutual dependency.
-            (cd test/mod3 && go vet ./...)
-            (cd test/mod4 && go vet ./...)
-            (cd test/mod5 && go vet ./...)
-            (cd test/mod6 && go vet ./...)
-            (cd modtest && go vet ./...)
-            (cd modtest/nestedmod && go vet ./...)
+            (cd test/diamonddep/mod1 && go vet ./...)
+            # test/diamonddep/mod2 doesn't build locally on its own due to
+            # mutual dependency.
+            (cd test/diamonddep/mod3 && go vet ./...)
+            (cd test/normaldeps/mod1 && go vet ./...)
+            (cd test/normaldeps/mod2 && go vet ./...)
+            (cd test/requestconflict/mod5 && go vet ./...)
+            (cd test/requestconflict/mod6 && go vet ./...)
+            (cd test/nested && go vet ./...)
+            (cd test/nested/nestedmod && go vet ./...)
       - run:
           name: gofmt
           command: |
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
-            (cd modtest && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
   build-gomod:
@@ -170,14 +172,16 @@ jobs:
           name: individual commands & packages build
           command: |
             (cd src && go build ./...)
-            (cd test/mod1 && go build ./...)
-            # test/mod2 doesn't build on its own due to mutual dependency.
-            (cd test/mod3 && go build ./...)
-            (cd test/mod4 && go build ./...)
-            (cd test/mod5 && go build ./...)
-            (cd test/mod6 && go build ./...)
-            (cd modtest && go build ./...)
-            (cd modtest/nestedmod && go build ./...)
+            (cd test/diamonddep/mod1 && go build ./...)
+            # test/diamonddep/mod2 doesn't build on its own due to mutual
+            # dependency.
+            (cd test/diamonddep/mod3 && go build ./...)
+            (cd test/normaldeps/mod1 && go build ./...)
+            (cd test/normaldeps/mod2 && go build ./...)
+            (cd test/requestconflict/mod5 && go build ./...)
+            (cd test/requestconflict/mod6 && go build ./...)
+            (cd test/nested && go build ./...)
+            (cd test/nested/nestedmod && go build ./...)
       - run:
           name: gobuilds
           command: ./gobuilds.sh
