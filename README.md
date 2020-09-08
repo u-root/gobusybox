@@ -3,20 +3,23 @@
 ## Common Dependency Conflicts
 
 If commands from more than one Go module are combined into a busybox, there are
-a few common dependency pitfalls to be aware of.
+a few common dependency pitfalls to be aware of. `gobusybox` will do its best to
+log actionable suggestions in case of conflicts.
 
-`gobusybox` will do its best to print actionable suggestions like this in case
-of conflicts.
+It's important to be aware that not all `go.mod` files are equal. The
+[**main module**](https://golang.org/ref/mod) is the module containing the
+directory where the `go` command is invoked. `replace` and `exclude` directives
+only apply in the main module's `go.mod` file and are ignored in other modules.
+
+If `gobusybox` is asked to combine programs under different main modules, it
+will do its best to merge the `replace` and `exclude` directives from all main
+module `go.mod` files. Certain conflicts can come up during this process.
 
 Let's say, for example, that [u-root](https://github.com/u-root/u-root)'s
 `cmds/core/*` is being combined into a busybox with
 [u-bmc](https://github.com/u-root/u-bmc)'s `cmd/*`. Both `u-root` and `u-bmc`
-have a go.mod that covers their commands. These are referred to as their
-respective [main module go.mod](https://golang.org/ref/mod); i.e. if you
-compiled `u-root/cmds/core/ls`, the main module go.mod would be `u-root/go.mod`.
-This matter because only the main module's `replace` and `exclude` directives
-are respected, and **gobusybox tries to merge each main module's `replace` and
-`exclude` directives**.
+have a `go.mod` that is their respective main module `go.mod`. The following are
+the kinds of conflicts that will come up:
 
 1.  Conflicting major version number dependencies. Ex:
 
@@ -34,7 +37,8 @@ are respected, and **gobusybox tries to merge each main module's `replace` and
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
     are being combined into a busybox with `./makebb ./u-root/cmds/core/\*
-    ./u-bmc/cmd/\*`, but u-bmc depends on u-root@v3 from GitHub.
+    ./u-bmc/cmd/\*`, but u-bmc depends on u-root@v3 from GitHub. However, you,
+    the user requested u-root to come from `./u-root` already.
 
     **Solution**: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
     ../u-root`.
