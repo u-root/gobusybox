@@ -18,32 +18,51 @@ This matter because only the main module's `replace` and `exclude` directives
 are respected, and **gobusybox tries to merge each main module's `replace` and
 `exclude` directives**.
 
-1.  Conflicting major version number dependencies. E.g. if u-root depends on
-    dhcp@v1 and u-bmc depends on dhcp@v2, that may be an irreconcilable
-    conflict.
+1.  Conflicting major version number dependencies. Ex:
 
-    Solution: advance u-root's version, or roll u-bmc's version back.
+    ```
+    > u-root/go.mod
+    require github.com/insomniacslk/dhcp/v1 v1.0.0-...
+
+    > u-bmc/go.mod
+    require github.com/insomniacslk/dhcp/v2 v2.0.0-...
+    ```
+
+    **Solution**: advance u-root's version or roll u-bmc's version back.
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
     are being combined into a busybox with `./makebb ./u-root/cmds/core/\*
     ./u-bmc/cmd/\*`, but u-bmc depends on u-root@v3 from GitHub.
 
-    Solution: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
+    **Solution**: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
     ../u-root`.
 
-1.  Conflicting local `replace` directives. If `u-root/go.mod` has `replace
-    github.com/insomniacslk/dhcp => ../local/dhcp`, but `u-bmc` still depends on
-    dhcp@v2 from GitHub, that is an irreconcilable conflict.
+1.  Conflicting local `replace` directives. Ex:
 
-    Solution: `u-bmc/go.mod` needs `replace github.com/insomniacslk/dhcp =>
-    $samedir/local/dhcp` as well.
+    ```
+    > u-root/go.mod
+    replace github.com/insomniacslk/dhcp => ../local/dhcp
 
-1.  Two conflicting local `replace` directives. If `u-root/go.mod` has `replace
-    github.com/insomniacslk/dhcp => ../my/dhcp` and `u-bmc/go.mod` has `replace
-    github.com/insomniacslk/dhcp => ../other/dhcp`, that is an irreconcilable
-    conflict.
+    > u-bmc/go.mod
+    require github.com/insomniacslk/dhcp/v2 v2.0.0.-...
+    ```
 
-    Solution: both go.mod files must point `replace
+    u-root has replaced dhcp, but u-bmc still depends on the remote dhcp/v2.
+
+    **Solution**: u-root drops local replace rule, or `u-bmc/go.mod` needs
+    `replace github.com/insomniacslk/dhcp => $samedir/local/dhcp` as well.
+
+1.  Two conflicting local `replace` directives. Ex:
+
+    ```
+    > u-root/go.mod
+    replace github.com/insomniacslk/dhcp => /some/dhcp
+
+    > u-bmc/go.mod
+    replace github.com/insomniacslk/dhcp => /other/dhcp
+    ```
+
+    **Solution**: both go.mod files must point `replace
     github.com/insomniacslk/dhcp` at the same directory.
 
 ## How It Works
