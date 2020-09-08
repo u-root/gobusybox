@@ -28,7 +28,9 @@ are respected, and **gobusybox tries to merge each main module's `replace` and
     require github.com/insomniacslk/dhcp/v2 v2.0.0-...
     ```
 
-    **Solution**: advance u-root's version or roll u-bmc's version back.
+    **Solution**: advance u-root's version or roll u-bmc's version back. See
+    [Minimal Version Selection](https://golang.org/ref/mod#minimal-version-selection)
+    for details on what Go expects.
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
     are being combined into a busybox with `./makebb ./u-root/cmds/core/\*
