@@ -762,6 +762,40 @@ func (p *Package) nextInit(addToCallList bool) *ast.Ident {
 	return i
 }
 
+// importName finds the package path to import, given the go/types pkg path.
+//
+// E.g. go/types uses the fully vendored name of a package, such as
+// github.com/u-root/u-root/vendor/golang.org/x/sys/unix. importName returns
+// the name that should appear in the import statement for this package, which
+// is golang.org/x/sys/unix.
+//
+// Since the only way this happens is through an implicit import, we know that
+// somewhere in the dependency tree this package must exist, so we visit all
+// dependencies looking for the go/types package path looking for a valid
+// package import path statement.
+func importName(p *packages.Package, typePkgPath string) string {
+	var importName string
+	// Go through all dependent packages.
+	packages.Visit([]*packages.Package{p}, func(p *packages.Package) bool {
+		// Yeah, packages.Visit already goes through all imports -- but
+		// it does not give us the index of the p.Imports map, which is
+		// the "import paths appearing in the package's Go source
+		// files".
+		for name, pkg := range p.Imports {
+			if pkg.PkgPath == typePkgPath {
+				importName = name
+				return false
+			}
+		}
+		return true
+	}, nil)
+	if len(importName) > 0 {
+		return importName
+	}
+	// It doesn't appear. We'll go import it.
+	return typePkgPath
+}
+
 // TODO:
 // - write an init name generator, in case InitN is already taken.
 func (p *Package) rewriteFile(f *ast.File) bool {
@@ -793,10 +827,14 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	// this function to map fully qualified package paths to a local alias,
 	// if it exists.
 	qualifier := func(pkg *types.Package) string {
-		if name, ok := importAliases[pkg.Path()]; ok {
+		// pkg.Path() = fully vendored package name.
+		// importPath = package name as it appears in `import` statement.
+		importPath := importName(p.Pkg, pkg.Path())
+
+		if name, ok := importAliases[importPath]; ok {
 			return name
 		}
-		if _, ok := unaliasedImports[pkg.Path()]; ok {
+		if _, ok := unaliasedImports[importPath]; ok {
 			// The package name is NOT the last component of its path.
 			return pkg.Name()
 		}
@@ -816,9 +854,9 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		//
 		// Then it's possible the `log` package was not referred to at
 		// all previously, and we now need to add an import for log.
-		astutil.AddImport(p.Pkg.Fset, f, pkg.Path())
+		astutil.AddImport(p.Pkg.Fset, f, importPath)
 		// Make sure we do not add this import twice.
-		unaliasedImports[pkg.Path()] = struct{}{}
+		unaliasedImports[importPath] = struct{}{}
 		return pkg.Name()
 	}
 
