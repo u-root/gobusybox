@@ -7,8 +7,8 @@ load("@bazel_gazelle//:def.bzl", "gazelle")
 go_busybox_binary(
     name = "bb",
     commands = [
-        "//cmd/helloworld:helloworld_lib",
-        "//cmd/dmesg:dmesg_lib",
+        "//bazeltest/cmd/helloworld:helloworld_lib",
+        "//bazeltest/cmd/dmesg:dmesg_lib",
     ],
 )
 
