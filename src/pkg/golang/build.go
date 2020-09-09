@@ -75,6 +75,10 @@ func (c Environ) envCommon() []string {
 	return env
 }
 
+func (c Environ) PATH() string {
+	return fmt.Sprintf("PATH=%s:%s", filepath.Join(c.GOROOT, "bin"), os.Getenv("PATH"))
+}
+
 func (c Environ) EnvHuman() []string {
 	env := c.envCommon()
 	if c.GOROOT != "" {
