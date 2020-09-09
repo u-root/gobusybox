@@ -13,7 +13,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,6 +34,8 @@ func find(finders []finder, pkg string) io.ReadCloser {
 	return nil
 }
 
+// zipReader exists only for the internal blaze Go toolchain, which is packaged
+// in a big zip.
 type zipReader struct {
 	ctxt   build.Context
 	stdlib *zip.Reader
@@ -81,17 +82,36 @@ func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
 type archives struct {
 	ctxt  build.Context
 	archs []string
+
+	// pkgs is a map of Go import path -> archive file.
+	//
+	// While in blaze, importPath == file path, in bazel each package gets
+	// to define its own import path.
+	pkgs map[string]string
 }
 
 func (a archives) findAndOpen(pkg string) io.ReadCloser {
+	// In bazel, non-stdlib dependencies should be found through this,
+	// because we pass an explicit map of import path -> archive path from
+	// the Starlark rules.
+	if filename, ok := a.pkgs[pkg]; ok {
+		f, err := os.Open(filename)
+		if err == nil {
+			return f
+		}
+	}
+
 	suffixes := []string{
-		// bazel
-		fmt.Sprintf("/%s.x", path.Base(pkg)),
-		fmt.Sprintf("/%s.a", path.Base(pkg)),
-		// blaze
+		// bazel stdlib archives should be found using this method.
+		fmt.Sprintf("/%s.x", pkg),
+		fmt.Sprintf("/%s.a", pkg),
+
+		// blaze finds non-stdlib dependency archives through this, and
+		// uses a zip for the stdlib files.
 		fmt.Sprintf("/%s.x", pkg),
 		fmt.Sprintf("/%s.a", pkg),
 	}
+
 	for _, s := range a.archs {
 		if fi, err := os.Stat(s); err == nil && fi.IsDir() {
 			name := fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg)
@@ -103,10 +123,9 @@ func (a archives) findAndOpen(pkg string) io.ReadCloser {
 		for _, suffix := range suffixes {
 			if strings.HasSuffix(s, suffix) {
 				ar, err := os.Open(s)
-				if err != nil {
-					return nil
+				if err == nil {
+					return ar
 				}
-				return ar
 			}
 		}
 	}
@@ -171,6 +190,20 @@ func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importe
 
 // New returns a new monorepo importer.
 func New(ctxt build.Context, archs []string, stdlib *zip.Reader) *Importer {
+	pkgs := make(map[string]string)
+	var unnamedArchives []string
+	for _, archive := range archs {
+		nameAndFile := strings.Split(archive, ":")
+		switch len(nameAndFile) {
+		case 0:
+			continue
+		case 1:
+			unnamedArchives = append(unnamedArchives, archive)
+		case 2:
+			pkgs[nameAndFile[0]] = nameAndFile[1]
+		}
+	}
+
 	i := &Importer{
 		imports: map[string]*types.Package{
 			"unsafe": types.Unsafe,
@@ -178,7 +211,8 @@ func New(ctxt build.Context, archs []string, stdlib *zip.Reader) *Importer {
 		fset: token.NewFileSet(),
 		archives: archives{
 			ctxt:  ctxt,
-			archs: archs,
+			archs: unnamedArchives,
+			pkgs:  pkgs,
 		},
 	}
 	if stdlib != nil {

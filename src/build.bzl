@@ -40,28 +40,7 @@ Example usage:
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_context", "go_library", "go_rule")
 load("@io_bazel_rules_go//go/private:providers.bzl", "GoArchive", "GoLibrary", "GoSource")
 
-GoDepsInfo = provider("transitive_files")
 CommandNamesInfo = provider("cmd_names")
-
-def _get_transitive_files(rulectx):
-    directs = []
-    transitives = []
-    for d in rulectx.attr.deps:
-        # Only taking the first two cuts out the .appengine.x. Find another
-        # way to exclude it.
-        directs += d.files.to_list()
-        if GoDepsInfo in d:
-            transitives.append(d[GoDepsInfo].transitive_files)
-    return depset(directs, transitive = transitives)
-
-def _go_dep_aspect(target, ctx):
-    _ = target  # unused.
-    tf = _get_transitive_files(ctx.rule)
-    return [GoDepsInfo(transitive_files = tf)]
-
-# An aspect that collects all files produced by every "deps"-listed label in
-# the tree.
-go_dep_aspect = aspect(implementation = _go_dep_aspect)
 
 def _uroot_rewrite_ast(ctx):
     """Rewrite one Go command to be a library.
@@ -84,9 +63,17 @@ def _uroot_rewrite_ast(ctx):
     for archive in goc.stdlib.libs:
         args.add("--archive", archive.path)
 
-    inputs = _get_transitive_files(ctx)
-    for f in inputs.to_list():
-        args.add("--archive", f.path)
+    depInputs = []
+    for dep in ctx.attr.deps:
+        # Direct dependency
+        arch = dep[GoArchive]
+        args.add("--archive", "%s:%s" % (arch.data.importpath, arch.data.file.path))
+        depInputs.append(arch.data.file)
+
+        # Transitive dependencies of the direct dependency.
+        for tdep in arch.transitive.to_list():
+            args.add("--archive", "%s:%s" % (tdep.importpath, tdep.file.path))
+            depInputs.append(tdep.file)
 
     output_dir = None
     outputs = []
@@ -105,7 +92,7 @@ def _uroot_rewrite_ast(ctx):
 
     # Run the rewrite_ast binary.
     ctx.actions.run(
-        inputs = depset(ctx.files.srcs, transitive = [inputs, depset(goc.stdlib.libs)]),
+        inputs = depset(ctx.files.srcs, transitive = [depset(depInputs), depset(goc.stdlib.libs)]),
         outputs = outputs,
         arguments = [args],
         executable = ctx.executable._rewrite_ast,
@@ -144,9 +131,7 @@ uroot_rewrite_ast = go_rule(
             allow_files = True,
         ),
         "deps": attr.label_list(
-            aspects = [go_dep_aspect],
-            providers = [GoDepsInfo],
-            allow_rules = ["go_library"],
+            providers = [GoArchive],
         ),
         "package_name": attr.string(
             mandatory = True,
