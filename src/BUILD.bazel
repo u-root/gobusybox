@@ -9,6 +9,7 @@ go_busybox_binary(
     commands = [
         "//bazeltest/cmd/helloworld:helloworld_lib",
         "//bazeltest/cmd/dmesg:dmesg_lib",
+        "//bazeltest/cmd/importsamename:importsamename_lib",
     ],
 )
 
