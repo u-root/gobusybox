@@ -772,13 +772,20 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 
 	// Map of fully qualified package name -> imported alias in the file.
 	importAliases := make(map[string]string)
+	unaliasedImports := make(map[string]struct{})
 	for _, impt := range f.Imports {
+		importPath, err := strconv.Unquote(impt.Path.Value)
+		if err != nil {
+			panic(err)
+		}
+
 		if impt.Name != nil {
-			importPath, err := strconv.Unquote(impt.Path.Value)
-			if err != nil {
-				panic(err)
-			}
 			importAliases[importPath] = impt.Name.Name
+		} else {
+			// We do not record the name of the package, because we
+			// do not know it. However, `qualifier` will know it
+			// because it's passed in.
+			unaliasedImports[importPath] = struct{}{}
 		}
 	}
 
@@ -786,14 +793,32 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	// this function to map fully qualified package paths to a local alias,
 	// if it exists.
 	qualifier := func(pkg *types.Package) string {
-		name, ok := importAliases[pkg.Path()]
-		if ok {
+		if name, ok := importAliases[pkg.Path()]; ok {
 			return name
+		}
+		if _, ok := unaliasedImports[pkg.Path()]; ok {
+			// The package name is NOT the last component of its path.
+			return pkg.Name()
 		}
 		// When referring to self, don't use any package name.
 		if pkg == p.Pkg.Types {
 			return ""
 		}
+
+		// This type is not imported in this file yet.
+		//
+		// This typically happens when a derived global import uses a
+		// type that was previously only implicitly used.
+		//
+		// E.g. if we call func Foo() *log.Logger like this:
+		//
+		//   var l = pkg.Foo()
+		//
+		// Then it's possible the `log` package was not referred to at
+		// all previously, and we now need to add an import for log.
+		astutil.AddImport(p.Pkg.Fset, f, pkg.Path())
+		// Make sure we do not add this import twice.
+		unaliasedImports[pkg.Path()] = struct{}{}
 		return pkg.Name()
 	}
 
