@@ -10,6 +10,7 @@ go_busybox_binary(
         "//bazeltest/cmd/helloworld:helloworld_lib",
         "//bazeltest/cmd/dmesg:dmesg_lib",
         "//bazeltest/cmd/importsamename:importsamename_lib",
+        "//bazeltest/cmd/implicitimport:implicitimport_lib",
     ],
 )
 
