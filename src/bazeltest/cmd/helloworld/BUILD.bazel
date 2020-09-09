@@ -2,15 +2,14 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary")
 load("//:build.bzl", "go_busybox_library")
 
 go_busybox_library(
-    name = "dmesg_lib",
-    srcs = ["dmesg.go"],
-    importpath = "github.com/u-root/gobusybox/src/cmd/dmesg",
+    name = "helloworld_lib",
+    srcs = ["hello.go"],
+    importpath = "github.com/u-root/gobusybox/src/bazeltest/cmd/helloworld",
     visibility = ["//visibility:public"],
-    deps = ["@org_golang_x_sys//unix"],
 )
 
 go_binary(
-    name = "dmesg",
-    embed = [":dmesg_lib"],
+    name = "helloworld",
+    embed = [":helloworld_lib"],
     visibility = ["//visibility:public"],
 )
