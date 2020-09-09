@@ -1,5 +1,65 @@
 ## Go Busybox
 
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src@master)
+[![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/master)
+[![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
+
+Go Busybox is a set of Go tools that allow you to compile many Go commands into
+one binary. The resulting binary uses its invocation arguments (`os.Args`) to
+determine which command is being called.
+
+Go Busybox works with Go 1.13+. It is well-tested with Linux on arm, arm64, and
+amd64.
+
+An example:
+
+```bash
+(cd ./src/cmd/makebb && go install)
+makebb ./test/nested/cmd/dmesg ./test/nested/cmd/strace
+```
+
+A binary named `bb` should appear. It can be invoked in one of two ways --
+either with a symlink or using a second argument.
+
+```bash
+# Make a symlink dmesg -> bb
+ln -s bb dmesg
+# Symlink means that argv[0] is the command name.
+./dmesg
+
+# Make a symlink strace -> bb
+ln -s bb strace
+./strace echo "hi"
+```
+
+```bash
+./bb dmesg
+./bb strace echo "hi"
+```
+
+Go Busybox does this by copying all the source for these Go commands and
+rewriting it [in a temporary directory](#how-it-works).
+
+Go Busybox can be used with **any Go commands** across multiple Go modules:
+
+```sh
+git clone https://github.com/hugelgupf/p9
+git clone https://github.com/gokrazy/gokrazy
+
+makebb ./p9/cmd/* ./gokrazy/cmd/*
+```
+
+**NOTE**: There are still some issues with Go module dependency resolution.
+Please file an [issue](https://github.com/u-root/gobusybox/issues/new) if you
+encounter one.
+
+## Contact
+
+People who use this project tend to hang out on the
+[#u-root-dev](https://osfw.slack.com/messages/u-root-dev) channel on the
+[Open Source Firmware Slack](https://slack.osfw.dev)
+([Sign Up Link](https://slack.osfw.dev)).
+
 ## Common Dependency Conflicts
 
 If commands from more than one Go module are combined into a busybox, there are
@@ -64,7 +124,7 @@ potential conflict and potential solutions you can enact in your code:
     for details on what Go expects.
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
-    are being combined into a busybox with `./makebb ./u-root/cmds/core/*
+    are being combined into a busybox with `makebb ./u-root/cmds/core/*
     ./u-bmc/cmd/*`. If `u-bmc/go.mod` depends on u-root@v3 from GitHub, that
     conflicts with the local `./u-root` being requested with makebb.
 
@@ -119,8 +179,8 @@ not recognized. Let's say `bb` is the compiled binary; the following are
 equivalent invocations of `sl` and `cowsay`:
 
 ```sh
-go build src/cmd/makebb
-./makebb test/nested/cmd/dmesg test/nested/cmd/strace
+(cd ./src/cmd/makebb && go install)
+makebb ./test/nested/cmd/dmesg ./test/nested/cmd/strace
 
 # Make a symlink dmesg -> bb
 ln -s bb dmesg
