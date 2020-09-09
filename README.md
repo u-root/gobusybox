@@ -3,7 +3,7 @@
 ## Common Dependency Conflicts
 
 If commands from more than one Go module are combined into a busybox, there are
-a few common dependency pitfalls to be aware of. `gobusybox` will do its best to
+a few common dependency pitfalls to be aware of. Go busybox will do its best to
 log actionable suggestions in case of conflicts.
 
 It's important to be aware that not all `go.mod` files are equal. The
@@ -11,15 +11,43 @@ It's important to be aware that not all `go.mod` files are equal. The
 directory where the `go` command is invoked. `replace` and `exclude` directives
 only apply in the main module's `go.mod` file and are ignored in other modules.
 
-If `gobusybox` is asked to combine programs under different main modules, it
-will do its best to merge the `replace` and `exclude` directives from all main
-module `go.mod` files. Certain conflicts can come up during this process.
+If Go busybox is asked to combine programs under different main modules, it will
+do its best to merge the `replace` and `exclude` directives from all main module
+`go.mod` files.
 
 Let's say, for example, that [u-root](https://github.com/u-root/u-root)'s
 `cmds/core/*` is being combined into a busybox with
-[u-bmc](https://github.com/u-root/u-bmc)'s `cmd/*`. Both `u-root` and `u-bmc`
-have a `go.mod` that is their respective main module `go.mod`. The following are
-the kinds of conflicts that will come up:
+[u-bmc](https://github.com/u-root/u-bmc)'s `cmd/*`. Each have a main module
+`go.mod`, one at `u-root/go.mod` and one at `u-bmc/go.mod`.
+
+```
+$ cat ./u-root/go.mod
+...
+replace github.com/intel-go/cpuid => /somewhere/cpuid
+exclude github.com/insomniacslk/dhcp v1.0.2
+```
+
+```
+$ cat ./u-bmc/go.mod
+...
+replace github.com/intel-go/cpuid => /somewhere/cpuid
+exclude github.com/mdlayher/ethernet v1.0.3
+```
+
+Go busybox generated `go.mod` (does not list `require` statements):
+
+```
+...
+# Because *both* u-root/go.mod and u-bmc/go.mod pointed to a local copy of cpuid
+replace github.com/intel-go/cpuid => ./src/github.com/intel-go/cpuid
+
+# From either go.mod file.
+exclude github.com/insomniacslk/dhcp v1.0.2
+exclude github.com/mdlayher/ethernet v1.0.3
+```
+
+Certain conflicts can come up during this prcess. This section covers each
+potential conflict and potential solutions you can enact in your code:
 
 1.  Conflicting major version number dependencies. Ex:
 
@@ -36,9 +64,9 @@ the kinds of conflicts that will come up:
     for details on what Go expects.
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
-    are being combined into a busybox with `./makebb ./u-root/cmds/core/\*
-    ./u-bmc/cmd/\*`, but u-bmc depends on u-root@v3 from GitHub. However, you,
-    the user requested u-root to come from `./u-root` already.
+    are being combined into a busybox with `./makebb ./u-root/cmds/core/*
+    ./u-bmc/cmd/*`. If `u-bmc/go.mod` depends on u-root@v3 from GitHub, that
+    conflicts with the local `./u-root` being requested with makebb.
 
     **Solution**: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
     ../u-root`.
