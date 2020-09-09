@@ -1,0 +1,16 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("//:build.bzl", "go_busybox_library")
+
+go_busybox_library(
+    name = "implicitimport_lib",
+    srcs = ["hello.go"],
+    importpath = "github.com/u-root/gobusybox/src/bazeltest/cmd/implicitimport",
+    visibility = ["//visibility:public"],
+    deps = ["//bazeltest/pkg/defaultlog"],
+)
+
+go_binary(
+    name = "implicitimport",
+    embed = [":implicitimport_lib"],
+    visibility = ["//visibility:public"],
+)

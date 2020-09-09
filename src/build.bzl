@@ -40,9 +40,21 @@ Example usage:
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_context", "go_library", "go_rule")
 load("@io_bazel_rules_go//go/private:providers.bzl", "GoArchive", "GoLibrary", "GoSource")
 
+GoDepsInfo = provider("targets")
 CommandNamesInfo = provider("cmd_names")
 
-def _uroot_rewrite_ast(ctx):
+def _go_dep_aspect(target, ctx):
+    targets = [target]
+    for dep in ctx.rule.attr.deps:
+        targets.append(dep)
+        if GoDepsInfo in dep:
+            targets.append(dep[GoDepsInfo].targets)
+    return [GoDepsInfo(targets = targets)]
+
+# An aspect that collects all recursive Target deps.
+go_dep_aspect = aspect(implementation = _go_dep_aspect)
+
+def __go_busybox_library(ctx):
     """Rewrite one Go command to be a library.
 
     It will take a go_binary's source files and rewrite them to be compatible
@@ -59,16 +71,23 @@ def _uroot_rewrite_ast(ctx):
     args.add("--name", ctx.attr.command_name)
     args.add("--package", ctx.attr.package_name)
 
-    goc = go_context(ctx)
-    for archive in goc.stdlib.libs:
+    go = go_context(ctx)
+    for archive in go.stdlib.libs:
         args.add("--archive", archive.path)
 
     depInputs = []
+    depTargets = []
     for dep in ctx.attr.deps:
         # Direct dependency
         arch = dep[GoArchive]
         args.add("--archive", "%s:%s" % (arch.data.importpath, arch.data.file.path))
         depInputs.append(arch.data.file)
+
+        # This indistriminanetly adds *every* transitive dependency to the
+        # top-level deps list. We could probably try to figure out which ones
+        # are necessary from the output of the run action, but that seems
+        # complicated, and bazel doesn't mind additional dependencies.
+        depTargets += dep[GoDepsInfo].targets
 
         # Transitive dependencies of the direct dependency.
         for tdep in arch.transitive.to_list():
@@ -83,7 +102,7 @@ def _uroot_rewrite_ast(ctx):
         # This relies on f.basename being relative to output_dir, which
         # they should be since they're relative to gen.. It's a
         # bit of a hack.
-        outf = ctx.actions.declare_file("gen/%s" % f.basename)
+        outf = go.actions.declare_file("gen/%s" % f.basename)
         outputs.append(outf)
         if not output_dir:
             output_dir = outf.dirname
@@ -92,51 +111,41 @@ def _uroot_rewrite_ast(ctx):
 
     # Run the rewrite_ast binary.
     ctx.actions.run(
-        inputs = depset(ctx.files.srcs, transitive = [depset(depInputs), depset(goc.stdlib.libs)]),
+        inputs = depset(ctx.files.srcs, transitive = [depset(depInputs), depset(go.stdlib.libs)]),
         outputs = outputs,
         arguments = [args],
         executable = ctx.executable._rewrite_ast,
     )
 
-    # This makes the target usable as a stand-in for a set of files.
-    return [DefaultInfo(files = depset(outputs))]
+    library = go.new_library(
+        go = go,
+        importpath = ctx.attr.importpath,
+        srcs = outputs,
+    )
+    attr = struct(
+        deps = ctx.attr.deps + depTargets,
+    )
+    source = go.library_to_source(go, attr, library, ctx.coverage_instrumented())
+    archive = go.archive(go, source)
+    return [library, source, archive, DefaultInfo(files = depset(outputs))]
 
-# Example usage:
-#
-# # Take all of ls' sources and rewrite them to be a library package.
-# uroot_rewrite_ast(
-#   name = "ls_uroot_rewrite",
-#   # The last component of this package name must match the "package X"
-#   # statement in ls.go.
-#   package_name = "cmds/ls/main",
-#   srcs = [
-#      "ls.go",
-#      "ls_unix.go",
-#   ],
-#   deps = [...],
-# )
-#
-# go_library(
-#   name = "ls_uroot",
-#   srcs = [
-#     # The rewrite rule provides all the source files we need.
-#     ":ls_uroot_rewrite",
-#   ],
-#   deps = [...],
-# )
-uroot_rewrite_ast = go_rule(
+_go_busybox_library = go_rule(
     attrs = {
         "srcs": attr.label_list(
             mandatory = True,
             allow_files = True,
         ),
         "deps": attr.label_list(
-            providers = [GoArchive],
+            providers = [GoArchive, GoDepsInfo],
+            aspects = [go_dep_aspect],
         ),
         "package_name": attr.string(
             mandatory = True,
         ),
         "command_name": attr.string(
+            mandatory = True,
+        ),
+        "importpath": attr.string(
             mandatory = True,
         ),
         "_stdlib": attr.label(
@@ -149,7 +158,7 @@ uroot_rewrite_ast = go_rule(
             default = Label("//cmd/rewritepkg"),
         ),
     },
-    implementation = _uroot_rewrite_ast,
+    implementation = __go_busybox_library,
 )
 
 def go_busybox_library(name, srcs, importpath, deps = [], **kwargs):
@@ -172,23 +181,12 @@ def go_busybox_library(name, srcs, importpath, deps = [], **kwargs):
     """
 
     # Rewrite the source files to be a Go library package.
-    uroot_rewrite_ast(
-        name = "%s_uroot_rewrite" % name,
+    _go_busybox_library(
+        name = "%s_uroot" % name,
         package_name = "%s/main" % native.package_name(),
         srcs = srcs,
         command_name = name,
-        # We need all dependencies to be built in order to use their type
-        # information, which is read from the generated object files.
-        #
-        # TODO: convert this to use the GoArchive provider.
-        deps = deps,
-    )
-
-    go_library(
-        name = "%s_uroot" % name,
-        # Use the source files generated by the above rule.
-        srcs = [":%s_uroot_rewrite" % name],
-        importpath = "%s_uroot" % importpath,
+        importpath = importpath,
         deps = deps,
         **kwargs
     )
