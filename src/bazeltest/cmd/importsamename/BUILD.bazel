@@ -1,5 +1,5 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_binary")
-load("//:build.bzl", "go_busybox_library")
+load("//:gobb.bzl", "go_busybox_library")
 
 go_busybox_library(
     name = "importsamename_lib",

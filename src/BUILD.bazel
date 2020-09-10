@@ -1,4 +1,4 @@
-load("//:build.bzl", "go_busybox_binary")
+load("//:gobb.bzl", "go_busybox_binary")
 load("@bazel_gazelle//:def.bzl", "gazelle")
 
 # gazelle:prefix github.com/u-root/gobusybox/src
