@@ -26,6 +26,7 @@ package bb
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"go/ast"
 	"go/format"
@@ -42,6 +43,7 @@ import (
 	"strings"
 
 	"github.com/google/goterm/term"
+	"golang.org/x/sys/unix"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
@@ -657,12 +659,18 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 
 	var allps []*packages.Package
 
+	// Find each packages' module, and batch package queries together by module.
+	//
+	// Query all packages that don't have a module at all together, as well.
+	//
+	// Batching these queries saves a *lot* of time; on the order of
+	// several minutes for 30+ commands.
 	mods, noModulePkgDirs := modules(absPaths)
 
 	for moduleDir, pkgDirs := range mods {
 		pkgs, err := loadFSPkgs(env, moduleDir, pkgDirs...)
 		if err != nil {
-			return nil, fmt.Errorf("could not find packages %v in module %s: %v", pkgDirs, moduleDir, err)
+			return nil, fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
 		}
 		for _, pkg := range pkgs {
 			allps = addPkg(allps, pkg)
@@ -674,7 +682,7 @@ func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.P
 		// go.mod anywhere in its parent tree.
 		vendoredPkgs, err := loadFSPkgs(env, noModulePkgDirs[0], noModulePkgDirs...)
 		if err != nil {
-			return nil, fmt.Errorf("could not find packages %v: %v", noModulePkgDirs, err)
+			return nil, fmt.Errorf("could not find packages: %v", err)
 		}
 		for _, p := range vendoredPkgs {
 			allps = addPkg(allps, p)
@@ -743,8 +751,53 @@ func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
 // `dir`. `go list -json` requires the import path to be relative to the dir
 // when the package is outside of a $GOPATH and there is no go.mod in any parent directory.
 func loadFSPkgs(env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
-	var relImportDirs []string
+	// Eligibility check: does each directory contain files that are
+	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
+	// tags?
+	//
+	// In Go 1.14 and Go 1.15, this is done by packages.Load on a
+	// per-package basis, which is why batching queries works out well. In
+	// Go 1.13, the entire query fails with no indication of which package
+	// made it fail, so we need to filter out commands that do not have
+	// compilable files first.
+	var compilableImportDirs []string
 	for _, importDir := range importDirs {
+		f, err := os.Open(importDir)
+		if err != nil {
+			return nil, err
+		}
+		names, err := f.Readdirnames(0)
+		if errors.Is(err, unix.ENOTDIR) {
+			return nil, fmt.Errorf("Go busybox requires a list of directories; failed to read directory %s: %v", importDir, err)
+		} else if err != nil {
+			return nil, fmt.Errorf("could not determine file names for %s: %v", importDir, err)
+		}
+		foundOne := false
+		for _, name := range names {
+			if match, err := env.Context.MatchFile(importDir, name); err != nil {
+				// This pretty much only returns an error if
+				// the file cannot be opened or read.
+				return nil, fmt.Errorf("could not determine Go build constraints of %s: %v", importDir, err)
+			} else if match {
+				foundOne = true
+				break
+			}
+		}
+		if foundOne {
+			compilableImportDirs = append(compilableImportDirs, importDir)
+		} else {
+			log.Printf("Skipping directory %s because build constraints exclude all Go files", importDir)
+		}
+	}
+
+	if len(compilableImportDirs) == 0 {
+		return nil, fmt.Errorf("build constraints excluded all requested commands")
+	}
+
+	// Make all paths relative, because packages.Load/`go list -json` does
+	// not like absolute paths sometimes.
+	var relImportDirs []string
+	for _, importDir := range compilableImportDirs {
 		relImportDir, err := filepath.Rel(dir, importDir)
 		if err != nil {
 			return nil, fmt.Errorf("Go package path %s is not relative to %s: %v", importDir, dir, err)
