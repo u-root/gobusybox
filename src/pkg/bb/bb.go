@@ -584,6 +584,9 @@ type Package struct {
 	// initCount keeps track of what the next init's index should be.
 	initCount uint
 
+	// mainFuncName is the name for the renamed main().
+	mainFuncName string
+
 	// init is the cmd.Init function that calls all other InitXs in the
 	// right order.
 	init *ast.FuncDecl
@@ -774,9 +777,11 @@ func NewPackage(name string, p *packages.Package) *Package {
 		initAssigns: make(map[ast.Expr]ast.Stmt),
 	}
 
+	pp.mainFuncName = pp.newFunctionName("registeredMain")
+
 	// This Init will hold calls to all other InitXs.
 	pp.init = &ast.FuncDecl{
-		Name: ast.NewIdent("Init"),
+		Name: ast.NewIdent(pp.newFunctionName("registeredInit")),
 		Type: &ast.FuncType{
 			Params:  &ast.FieldList{},
 			Results: nil,
@@ -873,9 +878,19 @@ func (p *Package) funcNameTaken(name string) bool {
 	return false
 }
 
-// newImport checks whether name can be used as a new import alias in f, and if
-// it can't, returns a different usable name.
-func (p *Package) newImport(name string, f *ast.File) string {
+// newFunctionName returns an unused function name in p with the prefix name.
+func (p *Package) newFunctionName(name string) string {
+	var i int
+	proposed := name
+	for p.funcNameTaken(proposed) {
+		proposed = fmt.Sprintf("%s%d", name, i)
+		i++
+	}
+	return proposed
+}
+
+// newImportName returns an unused import name in f/p with the prefix name.
+func (p *Package) newImportName(name string, f *ast.File) string {
 	var i int
 	proposed := name
 	for p.pkgImportNameTaken(proposed, f) {
@@ -941,7 +956,7 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		//
 		// Then it's possible the `log` package was not referred to at
 		// all previously, and we now need to add an import for log.
-		importAlias := p.newImport(pkg.Name(), f)
+		importAlias := p.newImportName(pkg.Name(), f)
 		astutil.AddNamedImport(p.Pkg.Fset, f, importAlias, importPath)
 		// Make sure we do not add this import twice.
 		importAliases[importPath] = importAlias
@@ -1000,7 +1015,7 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 
 		case *ast.FuncDecl:
 			if d.Recv == nil && d.Name.Name == "main" {
-				d.Name.Name = "Main"
+				d.Name.Name = p.mainFuncName
 				hasMain = true
 			}
 			if d.Recv == nil && d.Name.Name == "init" {
@@ -1086,7 +1101,7 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	}
 
 	// import bbmain "bbImportPath"
-	importName := p.newImport("bbmain", mainFile)
+	importName := p.newImportName("bbmain", mainFile)
 	astutil.AddNamedImport(p.Pkg.Fset, mainFile, importName, bbImportPath)
 
 	// func init() {
@@ -1106,9 +1121,9 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 							Value: strconv.Quote(p.Name),
 						},
 						// init=
-						ast.NewIdent("Init"),
+						ast.NewIdent(p.init.Name.Name),
 						// main=
-						ast.NewIdent("Main"),
+						ast.NewIdent(p.mainFuncName),
 					},
 				}},
 			},
