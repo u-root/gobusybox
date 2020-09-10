@@ -1,5 +1,5 @@
 #!/bin/bash
-set -eux
+set -ex
 
 if [ -z "$GOROOT" ]; then
   GO="go"
@@ -19,6 +19,8 @@ EMPTY_TMPDIR=$(mktemp -d)
 
 function ctrl_c() {
   rm -rf $TMPDIR
+  # https://github.com/golang/go/issues/27455
+  GOPATH=$EMPTY_TMPDIR $GO clean -cache -modcache
   rm -rf $EMPTY_TMPDIR
 }
 trap ctrl_c INT
@@ -43,11 +45,10 @@ GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb $TM
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/* $TMPDIR/u-bmc/cmd/*
 
-# This should work as is, too. It'll pull it straight from the internet.
-#GO111MODULE=on ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
 rm -rf $TMPDIR
+# https://github.com/golang/go/issues/27455
+GOPATH=$EMPTY_TMPDIR $GO clean -cache -modcache
 rm -rf $EMPTY_TMPDIR
-
 
 # Try vendor-based $GOPATH u-root.
 GOPATH_TMPDIR=$(mktemp -d)
