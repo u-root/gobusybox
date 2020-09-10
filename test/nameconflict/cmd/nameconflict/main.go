@@ -8,7 +8,12 @@ import (
 
 	// anotherlog makes sure that a package can be imported twice with a different name.
 	anotherlog "github.com/u-root/gobusybox/test/nameconflict/pkg/defaultlog"
+
+	// Create a conflict with the self-registering package import.
+	bbmain "flag"
 )
+
+var something = bbmain.String("someflag", "", "")
 
 // log will conflict with `import "log"` in order to read
 //
