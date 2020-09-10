@@ -36,6 +36,10 @@ trap ctrl_c INT
 
 # Make u-bmc have modules, and use local u-root.
 (cd $TMPDIR/u-bmc && $GO mod init github.com/u-root/u-bmc)
+(cd $TMPDIR/u-bmc && touch config/i_agree_to_the_acme_terms)
+# fake ssh key, whatever.
+(cd $TMPDIR/u-bmc && touch ssh_keys.pub)
+(cd $TMPDIR/u-bmc && $GO generate ./config)
 echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/u-bmc/go.mod
 
 # Make p9 use local u-root.
@@ -43,7 +47,8 @@ echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/p9/go.mod
 
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/* $TMPDIR/u-bmc/cmd/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+GOARM=5 GOARCH=arm GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/core/* $TMPDIR/u-bmc/cmd/* $TMPDIR/u-bmc/platform/quanta-f06-leopard-ddr3/cmd/*
 
 rm -rf $TMPDIR
 # https://github.com/golang/go/issues/27455
