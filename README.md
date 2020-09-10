@@ -1,6 +1,6 @@
 ## Go Busybox
 
-[![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src@master)
+[![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src)
 [![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/master)
 [![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
 
@@ -54,7 +54,7 @@ makebb ./p9/cmd/* ./gokrazy/cmd/*
 ### APIs
 
 Besides the makebb CLI command, there is a
-[Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb@master)
+[Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb)
 and bazel rules in [src/gobb.bzl](src/gobb.bzl).
 
 ### Shortcomings
