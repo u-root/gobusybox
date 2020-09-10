@@ -14,6 +14,7 @@ go_library(
         "//pkg/golang",
         "@com_github_google_goterm//term",
         "@com_github_u_root_u_root//pkg/cp",
+        "@org_golang_x_sys//unix",
         "@org_golang_x_tools//go/ast/astutil",
         "@org_golang_x_tools//go/packages",
         "@org_golang_x_tools//imports",
