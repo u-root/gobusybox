@@ -2,20 +2,28 @@ version: 2
 
 templates:
   gopath-template: &gopath-template
-    docker:
-      - image: circleci/golang:1.14
     working_directory: /go/src/github.com/u-root/gobusybox
     environment:
       - GOPATH: "/go"
       - CGO_ENABLED: 0
 
   gomod-template: &gomod-template
-    docker:
-      - image: circleci/golang:1.13
     working_directory: /home/circleci/gobusybox
     environment:
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
+
+  go113-template: &go113-template
+    docker:
+      - image: circleci/golang:1.13
+
+  go114-template: &go114-template
+    docker:
+      - image: circleci/golang:1.14
+
+  go115-template: &go115-template
+    docker:
+      - image: circleci/golang:1.15
 
   bazel-template: &bazel-template
     docker:
@@ -24,6 +32,44 @@ templates:
     environment:
       - GOPATH: "/go"
 
+  build-gomod-template: &build-gomod-template
+    steps:
+      - checkout
+      - run:
+          name: individual commands & packages build
+          command: |
+            (cd src && go build ./...)
+            (cd test/diamonddep/mod1 && go build ./...)
+            # test/diamonddep/mod2 doesn't build on its own due to mutual
+            # dependency.
+            (cd test/diamonddep/mod3 && go build ./...)
+            (cd test/normaldeps/mod1 && go build ./...)
+            (cd test/normaldeps/mod2 && go build ./...)
+            (cd test/requestconflict/mod5 && go build ./...)
+            (cd test/requestconflict/mod6 && go build ./...)
+            (cd test/nested && go build ./...)
+            (cd test/nested/nestedmod && go build ./...)
+      - run:
+          name: gobuilds
+          command: ./gobuilds.sh
+      - run:
+          name: build u-root & u-bmc & gokrazy & p9
+          command: ./test-external.sh
+
+  build-gopath-template: &build-gopath-template
+    steps:
+      - checkout
+      - run:
+          name: go env
+          command: go env
+      - run:
+          name: gobuilds-gopath
+          command: ./gobuilds-gopath.sh
+      - run:
+          name: build u-root (vendored)
+          command: |
+            (cd src/cmd/makebb && go build)
+            GO111MODULE=off go get github.com/u-root/u-root
 
 workflows:
   version: 2
@@ -33,27 +79,37 @@ workflows:
       - clean-gomod
       - clean-makebb
       - clean-bazel
-      - build-gopath:
+      - build-gopath-go113:
           requires:
             - clean-makebb
             - clean-gopath
-      - build-external-gopath:
+      - build-gopath-go114:
           requires:
-            - build-gopath
-      - build-gomod:
+            - clean-makebb
+            - clean-gopath
+      - build-gopath-go115:
+          requires:
+            - clean-makebb
+            - clean-gopath
+      - build-gomod-go113:
           requires:
             - clean-makebb
             - clean-gomod
-      - build-external-gomod:
+      - build-gomod-go114:
           requires:
-            - build-gomod
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-go115:
+          requires:
+            - clean-makebb
+            - clean-gomod
       - build-bazel:
           requires:
             - clean-bazel
 
 jobs:
   clean-makebb:
-    <<: *gomod-template
+    <<: [*go115-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -74,7 +130,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: *gopath-template
+    <<: [*go115-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -106,30 +162,17 @@ jobs:
             cd vendortest
             test -z "$(gofmt -s -l $(find -name '*.go' | grep -v /vendor/))"
 
-  build-gopath:
-    <<: *gopath-template
-    steps:
-      - checkout
-      - run:
-          name: go env
-          command: go env
-      - run:
-          name: gobuilds-gopath
-          command: ./gobuilds-gopath.sh
+  build-gopath-go113:
+    <<: [*go113-template, *gopath-template, *build-gopath-template]
 
-  build-external-gopath:
-    <<: *gopath-template
-    steps:
-      - checkout
-      - run:
-          name: build u-root (vendored)
-          command: |
-            (cd src/cmd/makebb && go build)
-            GO111MODULE=off go get github.com/u-root/u-root
-            ./src/cmd/makebb/makebb ../u-root/cmds/*/*
+  build-gopath-go114:
+    <<: [*go114-template, *gopath-template, *build-gopath-template]
+
+  build-gopath-go115:
+    <<: [*go115-template, *gopath-template, *build-gopath-template]
 
   clean-gomod:
-    <<: *gomod-template
+    <<: [*go115-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -175,35 +218,14 @@ jobs:
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
-  build-gomod:
-    <<: *gomod-template
-    steps:
-      - checkout
-      - run:
-          name: individual commands & packages build
-          command: |
-            (cd src && go build ./...)
-            (cd test/diamonddep/mod1 && go build ./...)
-            # test/diamonddep/mod2 doesn't build on its own due to mutual
-            # dependency.
-            (cd test/diamonddep/mod3 && go build ./...)
-            (cd test/normaldeps/mod1 && go build ./...)
-            (cd test/normaldeps/mod2 && go build ./...)
-            (cd test/requestconflict/mod5 && go build ./...)
-            (cd test/requestconflict/mod6 && go build ./...)
-            (cd test/nested && go build ./...)
-            (cd test/nested/nestedmod && go build ./...)
-      - run:
-          name: gobuilds
-          command: ./gobuilds.sh
+  build-gomod-go113:
+    <<: [*go113-template, *gomod-template, *build-gomod-template]
 
-  build-external-gomod:
-    <<: *gomod-template
-    steps:
-      - checkout
-      - run:
-          name: build u-root & u-bmc & gokrazy & p9
-          command: ./test-external.sh
+  build-gomod-go114:
+    <<: [*go114-template, *gomod-template, *build-gomod-template]
+
+  build-gomod-go115:
+    <<: [*go115-template, *gomod-template, *build-gomod-template]
 
   clean-bazel:
     <<: *bazel-template
