@@ -1,7 +1,7 @@
 ## Go Busybox
 
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src)
-[![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/master)
+[![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/main)
 [![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
 
 Go Busybox is a set of Go tools that allow you to compile many Go commands into
