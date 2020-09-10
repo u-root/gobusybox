@@ -32,6 +32,8 @@ ln -s bb strace
 ./strace echo "hi"
 ```
 
+If symlinks are a hassle, you can also invoke the binary like this:
+
 ```bash
 ./bb dmesg
 ./bb strace echo "hi"
@@ -49,11 +51,27 @@ git clone https://github.com/gokrazy/gokrazy
 makebb ./p9/cmd/* ./gokrazy/cmd/*
 ```
 
-**NOTE**: There are still some issues with Go module dependency resolution.
-Please file an [issue](https://github.com/u-root/gobusybox/issues/new) if you
-encounter one.
+### Shortcomings
 
-## Contact
+-   Any *imported* packages' `init` functions are run for *every* command.
+
+    For example, if some command imports the `testing` package, all commands in
+    the busybox will have testing's flags registered as a side effect, because
+    `testing`'s init function runs with every command.
+
+    While Go busybox handles every main commands' init functions, it does not
+    handle dependencies' init functions. Done properly, it would have to rewrite
+    all non-standard-library packages as well as commands. This has not been
+    necessary to implement so far. It would likely be necessary if, for example,
+    two different imported packages register the same flag unconditionally
+    globally.
+
+-   There are still some issues with Go module dependency resolution. Please
+    file an [issue](https://github.com/u-root/gobusybox/issues/new) if you
+    encounter one, even if it turns out to be your own issue -- our error
+    messages should be telling users what to fix and why.
+
+### Contact
 
 People who use this project tend to hang out on the
 [#u-root-dev](https://osfw.slack.com/messages/u-root-dev) channel on the
@@ -199,11 +217,12 @@ ln -s bb strace
 ### Command Transformation
 
 Principally, the AST transformation moves all global side-effects into callable
-package functions. E.g. `main` becomes `Main`, each `init` becomes `InitN`, and
-global variable assignments are moved into their own `InitN`.
+package functions. E.g. `main` becomes `registeredMain`, each `init` becomes
+`initN`, and global variable assignments are moved into their own `initN`. A
+`registeredInit` calls each `initN` function in the correct init order.
 
-Then, these `Main` and `Init` functions can be registered with a global map of
-commands by name and used when called upon.
+Then, these `registeredMain` and `registeredInit` functions can be registered
+with a global map of commands by name and used when called upon.
 
 Let's say a command `github.com/org/repo/cmds/sl` contains the following
 `main.go`:
@@ -235,59 +254,57 @@ package sl // based on the directory name or bazel-rule go_binary name
 import (
   "flag"
   "log"
+
+  "../bb/pkg/bbmain" // generated import path
 )
 
 // Type has to be inferred through type checking.
 var name *string
 
-func Init0() {
+func init0() {
   log.Printf("init %s", *name)
 }
 
-func Init1() {
+func init1() {
   name = flag.String("name", "", "Gimme name")
 }
 
-func Init() {
+func registeredInit() {
   // Order is determined by go/types.Info.InitOrder.
-  Init1()
-  Init0()
+  init1()
+  init0()
 }
 
-func Main() {
+func registeredMain() {
   log.Printf("train")
+}
+
+func init() {
+  bbmain.Register("sl", registeredInit, registeredMain)
 }
 ```
 
 ### Generated main.go
+
+The main.go file is generated from
+[./src/pkg/bb/bbmain/cmd/main.go](./src/pkg/bb/bbmain/cmd/main.go).
 
 ```go
 package main
 
 import (
   "os"
+  "log"
+  "path/filepath"
 
-  mangledsl "github.com/org/repo/cmds/sl"
+  // Side-effect import so init in sl calls bbmain.Register
+  _ "github.com/org/repo/cmds/sl"
+
+  "../bb/pkg/bbmain"
 )
 
-var bbcmds = map[string]...
-
-func Register(...)
-
-func Run(name string) {
-  if funcs, ok := bbcmds[name]; ok {
-    funcs.Init()
-    funcs.Main()
-    os.Exit(0)
-  }
-}
-
 func main() {
-  Run(os.Argv[0])
-}
-
-func init() {
-  Register("sl", mangledsl.Init, mangledsl.Main)
+  bbmain.Run(filepath.Base(os.Argv[0]))
 }
 ```
 
@@ -297,16 +314,20 @@ All files are written into a temporary directory. All dependencies that can be
 found on the local file system are also written there.
 
 The directory structure we generate resembles a $GOPATH-based source tree, even
-if we are combining module-based Go commands. This just lends code reuse within
-bb: if you remove all the go.mod file, and add in vendored files, the tree still
-compiles.
+if we are combining module-based Go commands. This just lends itself to code
+reuse within bb: if you remove all the go.mod file, and add in vendored files,
+the tree still compiles.
 
 ```
 /tmp/bb-$NUM/
-├── go.mod                            << generated top-level main module go.mod (see below)
 └── src
-    ├── bb
-    │   └── main.go                   << generated main.go
+    ├── bb.u-root.com
+    │   └── bb
+    │       ├── go.mod                << generated main module go.mod (see below)
+    │       ├── main.go               << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
+    │       └── pkg
+    │           └── bbmain
+    │               └── register.go   << ./src/pkg/bb/bbmain/register.go
     └── github.com
         └── u-root
             ├── u-bmc
@@ -359,11 +380,11 @@ Local dependencies can be many kinds, and they all need some special attention:
     [main module go.mod](https://golang.org/ref/mod) files, which would be
     `u-root/go.mod` and `u-bmc/go.mod` respectively in the above example. The
     compiled busybox shall respect **all** main modules' `replace` directives,
-    so they must be added to the generated top-level main module go.mod.
+    so they must be added to the generated main module go.mod.
 
-### Top-level go.mod
+### Generated main module go.mod
 
-The top-level go.mod refers packages to their local copies:
+The generated main module go.mod refers packages to their local copies:
 
 ```
 package bb.u-root.com # some domain that will never exist
@@ -380,13 +401,3 @@ replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
 If `u-root/go.mod` and `u-bmc/go.mod` contained any `replace` or `exclude`
 directives, they also need to be placed in this go.mod, which is the main module
 go.mod for `bb/main.go`.
-
-### Shortcomings
-
--   If there is already a function `Main` or `InitN` for some `N`, there may be
-    a compilation error.
--   Any packages imported by commands may still have global side-effects
-    affecting other commands. Done properly, we would have to rewrite all
-    non-standard-library packages as well as commands. This has not been
-    necessary to implement so far. It would likely be necessary if two different
-    imported packages register the same flag unconditionally globally.
