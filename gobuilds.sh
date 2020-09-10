@@ -6,3 +6,4 @@ set -eux
 (cd ./test/requestconflict && ./test.sh)
 (cd ./test/nested && ./test.sh)
 (cd ./test/implicitimport && ./test.sh)
+(cd ./test/nameconflict && ./test.sh)
