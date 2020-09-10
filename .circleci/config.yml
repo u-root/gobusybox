@@ -195,7 +195,7 @@ jobs:
             if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'go.mod/go.sum is out-of-date: run `go mod tidy` in the right module directories (see git status) and then check in the changes'
               echo 'If `go mod tidy` results in no changes, make sure you are using the latest relase of Go'
-              git status --porcelain vendor
+              git status --porcelain .
               exit 1
             fi
       - run:
@@ -236,9 +236,9 @@ jobs:
           command: |
             cd src && bazel run //:gazelle
             git status
-            if [[ -n "$(git status --porcelain src)" ]]; then
+            if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'BUILD files are out-of-date: run `cd src && bazel run //:gazelle` and then check in the changes'
-              git status --porcelain src
+              git status --porcelain .
               exit 1
             fi
 
