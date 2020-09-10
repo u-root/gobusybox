@@ -6,10 +6,8 @@
 //
 // This allows you to take two Go commands, such as Go implementations of `sl`
 // and `cowsay` and compile them into one binary, callable like `./bb sl` and
-// `./bb cowsay`.
-//
-// Which command is invoked is determined by `argv[0]` or `argv[1]` if
-// `argv[0]` is not recognized.
+// `./bb cowsay`. Which command is invoked is determined by `argv[0]` or
+// `argv[1]` if `argv[0]` is not recognized.
 //
 // Under the hood, bb implements a Go source-to-source transformation on pure
 // Go code. This AST transformation does the following:
@@ -20,8 +18,9 @@
 //     command package based on `argv[0]`.
 //
 // Principally, the AST transformation moves all global side-effects into
-// callable package functions. E.g. `main` becomes `Main`, each `init` becomes
-// `InitN`, and global variable assignments are moved into their own `InitN`.
+// callable package functions. E.g. `main` becomes `registeredMain`, each
+// `init` becomes `initN`, and global variable assignments are moved into their
+// own `initN`.
 package bb
 
 import (
@@ -74,10 +73,13 @@ func importPath(s *ast.ImportSpec) string {
 	return t
 }
 
-// BuildBusybox builds a busybox of the given Go packages.
+// BuildBusybox builds a busybox of the given Go commands.
 //
-// pkgs is a list of Go import paths. If nil is returned, binaryPath will hold
-// the busybox-style binary.
+// cmdPaths is a list of Go import paths or file system directories containing
+// Go commands. binaryPath is the output binary path. noStrip determines
+// whether to strip all symbols from the busybox binary to save more space.
+//
+// env is the Go environment (GOOS, GOARCH, etc).
 func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPath string) (nerr error) {
 	tmpDir, err := ioutil.TempDir("", "bb-")
 	if err != nil {
@@ -85,7 +87,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 	defer func() {
 		if nerr != nil {
-			log.Printf("Preserving bb temporary directory at %s due to error", tmpDir)
+			log.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
 		} else {
 			os.RemoveAll(tmpDir)
 		}
@@ -221,13 +223,14 @@ func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
 		return fmt.Errorf("bb package not found")
 	}
 
+	// Fix the import path for bbmain, since we wrote bbmain/register.go into bbDir above.
 	if !astutil.RewriteImport(bbFset, bbFiles[0], "github.com/u-root/gobusybox/src/pkg/bb/bbmain", "bb.u-root.com/bb/pkg/bbmain") {
 		return fmt.Errorf("could not rewrite import")
 	}
 
 	// Create bb main.go.
 	if err := CreateBBMainSource(bbFset, bbFiles, bbImports, bbDir); err != nil {
-		return fmt.Errorf("creating bb main() file failed: %v", err)
+		return fmt.Errorf("creating bb main.go file failed: %v", err)
 	}
 	return nil
 }
@@ -398,28 +401,7 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 	// replace and exclude directives. If they conflict, we need to have a
 	// legible error message for the user.
 
-	// Copy go.mod files for all local modules (= command modules, and
-	// local dependency modules they depend on).
-	/*for _, p := range localDepPkgs {
-		// Only replaced modules can be potentially local.
-		if p.Module != nil && p.Module.Replace != nil && isReplacedModuleLocal(p.Module.Replace) {
-
-			// All local modules must be declared in the top-level go.mod
-			modules[p.Module.Path] = struct{}{}
-		}
-	}
-
-	for _, m := range localModules {
-		if p.Pkg.Module != nil {
-			modules[p.Pkg.Module.Path] = struct{}{}
-		}
-
-		if err := copyGoMod(p.Pkg.Module); err != nil {
-			return false, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg, err)
-		}
-	}*/
-
-	// Copy local dependency packages into temporary module directories at
+	// Copy local dependency packages into module directories at
 	// tmpDir/src.
 	seenIDs := make(map[string]struct{})
 	for _, p := range localDepPkgs {
@@ -493,11 +475,12 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
 		return deps(p, func(pkg *packages.Package) bool {
+			// Replaced modules can be local on the file system.
 			if pkg.Module != nil && pkg.Module.Replace != nil && isReplacedModuleLocal(pkg.Module.Replace) {
 				return true
 			}
 
-			// Is this a dependency within the module?
+			// Is this a dependency within a local module?
 			for _, modulePath := range localModules {
 				if strings.HasPrefix(pkg.PkgPath, modulePath) {
 					return true
@@ -518,7 +501,7 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 	})
 }
 
-// ParseAST parses the given files for a package named main.
+// ParseAST parses the given files for a package named name.
 //
 // Only files with a matching package statement will be part of the AST
 // returned.
@@ -553,14 +536,10 @@ func ParseAST(name string, files []string) (*token.FileSet, []*ast.File, []strin
 	return fset, sortedFiles, parsedFiles, nil
 }
 
-// CreateBBMainSource creates a bb Go command that imports all given pkgs.
+// CreateBBMainSource creates a bb Go command main.go that imports all given
+// pkgs and writes the command to destDir.
 //
-// p must be the bb template.
-//
-// - For each pkg in pkgs, add
-//     import _ "pkg"
-//   to astp's first file.
-// - Write source file out to destDir.
+// fset and files must be parsed bb template main.go, usually ./bbmain/cmd/main.go.
 func CreateBBMainSource(fset *token.FileSet, files []*ast.File, pkgs []string, destDir string) error {
 	if len(files) != 1 {
 		return fmt.Errorf("bb cmd template is supposed to only have one file")
@@ -1120,11 +1099,16 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 	return nil
 }
 
-// Rewrite rewrites p into destDir as a bb package, creating an Init and Main function.
+// Rewrite rewrites p into destDir as a bb package, rewriting its init and main
+// functions.
+//
+// bbImportPath is the importpath to use for bbmain. bbImportPath is usually
+// bb.u-root.com/bb/pkg/bbmain for the Go module/vendor-based compilations, but
+// github.com/u-root/gobusybox/src/pkg/bb/bbmain for bazel-based compilations.
 func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	// This init holds all variable initializations.
 	//
-	// func Init0() {}
+	// func init0() {}
 	varInit := &ast.FuncDecl{
 		Name: p.nextInit(true),
 		Type: &ast.FuncType{
