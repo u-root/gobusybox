@@ -1,17 +1,25 @@
 #!/bin/bash
 set -eux
 
+if [ -z "$GOROOT" ]; then
+  GO="go"
+else
+  GO="$GOROOT/bin/go"
+fi
+
 cd src/cmd/makebb
 
-go generate
-go build
+$GO generate
+$GO build
 
 cd ../../..
 
 TMPDIR=$(mktemp -d)
+EMPTY_TMPDIR=$(mktemp -d)
 
 function ctrl_c() {
   rm -rf $TMPDIR
+  rm -rf $EMPTY_TMPDIR
 }
 trap ctrl_c INT
 
@@ -22,22 +30,23 @@ trap ctrl_c INT
 (cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
 
 # Make u-root have modules.
-(cd $TMPDIR/u-root && go mod init github.com/u-root/u-root && rm -rf vendor)
+(cd $TMPDIR/u-root && $GO mod init github.com/u-root/u-root && rm -rf vendor)
 
 # Make u-bmc have modules, and use local u-root.
-(cd $TMPDIR/u-bmc && go mod init github.com/u-root/u-bmc)
+(cd $TMPDIR/u-bmc && $GO mod init github.com/u-root/u-bmc)
 echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/u-bmc/go.mod
 
 # Make p9 use local u-root.
 echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/p9/go.mod
 
-GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
-GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
-GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/* $TMPDIR/u-bmc/cmd/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/* $TMPDIR/u-bmc/cmd/*
 
 # This should work as is, too. It'll pull it straight from the internet.
 #GO111MODULE=on ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
 rm -rf $TMPDIR
+rm -rf $EMPTY_TMPDIR
 
 
 # Try vendor-based $GOPATH u-root.
@@ -47,6 +56,6 @@ function ctrl_c() {
 }
 trap ctrl_c INT
 
-(cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off go get -u github.com/u-root/u-root)
-GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
+(cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
+GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
 rm -rf $GOPATH_TMPDIR
