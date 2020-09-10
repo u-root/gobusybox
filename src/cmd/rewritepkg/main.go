@@ -24,6 +24,7 @@ var (
 	destDir       = flag.String("dest_dir", "", "Destination directory")
 	goarch        = flag.String("goarch", "", "override GOARCH of the resulting busybox")
 	installSuffix = flag.String("install_suffix", "", "override installsuffix of the resulting busybox")
+	bbImportPath  = flag.String("bb_import_path", "", "BB import path")
 	gorootDir     uflag.Strings
 	archives      uflag.Strings
 	sourceFiles   uflag.Strings
@@ -89,7 +90,7 @@ func main() {
 	}
 
 	bbPkg := bb.NewPackage(*name, p)
-	if err := bbPkg.Rewrite(*destDir); err != nil {
+	if err := bbPkg.Rewrite(*destDir, *bbImportPath); err != nil {
 		log.Fatal(err)
 	}
 }

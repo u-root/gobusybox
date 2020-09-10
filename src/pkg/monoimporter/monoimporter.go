@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"go/ast"
 	"go/build"
-	"go/parser"
 	"go/token"
 	"go/types"
 	"io"
@@ -17,6 +16,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/u-root/gobusybox/src/pkg/bb"
 	"golang.org/x/tools/go/gcexportdata"
 	"golang.org/x/tools/go/packages"
 )
@@ -252,7 +252,7 @@ func Load(pkgPath string, filepaths []string, importer types.Importer) (*package
 	}
 
 	// If go_binary, bla, if go_library, bla
-	fset, astFiles, parsedFileNames, err := ParseAST("main", filepaths)
+	fset, astFiles, parsedFileNames, err := bb.ParseAST("main", filepaths)
 	if err != nil {
 		return nil, err
 	}
@@ -285,39 +285,4 @@ func Load(pkgPath string, filepaths []string, importer types.Importer) (*package
 	}
 	p.Types = tpkg
 	return p, nil
-}
-
-// ParseAST parses the given files for a package named main.
-//
-// Only files with a matching package statement will be part of the AST
-// returned.
-func ParseAST(name string, files []string) (*token.FileSet, []*ast.File, []string, error) {
-	fset := token.NewFileSet()
-	astFiles := make(map[string]*ast.File)
-	for _, path := range files {
-		if src, err := parser.ParseFile(fset, path, nil, parser.ParseComments); err == nil && src.Name.Name == name {
-			astFiles[path] = src
-		} else if err != nil {
-			return nil, nil, nil, fmt.Errorf("failed to parse AST in file %q: %v", path, err)
-		}
-	}
-
-	// Did we parse anything?
-	if len(astFiles) == 0 {
-		return nil, nil, nil, fmt.Errorf("no valid `main` package files found in %v", files)
-	}
-
-	// The order of types.Info.InitOrder depends on this list of files
-	// always being passed to conf.Check in the same order.
-	sort.Strings(files)
-
-	sortedFiles := make([]*ast.File, 0, len(astFiles))
-	parsedFiles := make([]string, 0, len(astFiles))
-	for _, name := range files {
-		if f, ok := astFiles[name]; ok {
-			sortedFiles = append(sortedFiles, f)
-			parsedFiles = append(parsedFiles, name)
-		}
-	}
-	return fset, sortedFiles, parsedFiles, nil
 }

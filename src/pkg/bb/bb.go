@@ -29,6 +29,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/format"
+	"go/parser"
 	"go/token"
 	"go/types"
 	"io/ioutil"
@@ -36,6 +37,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -58,6 +60,16 @@ func checkDuplicate(cmds []string) error {
 		seen[name] = struct{}{}
 	}
 	return nil
+}
+
+// importPath returns the unquoted import path of s,
+// or "" if the path is not properly quoted.
+func importPath(s *ast.ImportSpec) string {
+	t, err := strconv.Unquote(s.Path.Value)
+	if err != nil {
+		return ""
+	}
+	return t
 }
 
 // BuildBusybox builds a busybox of the given Go packages.
@@ -99,8 +111,8 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	//
 	// Structure we'll build:
 	//
-	//   tmp/src/bb
-	//   tmp/src/bb/main.go
+	//   tmp/src/bb.u-root.com/bb
+	//   tmp/src/bb.u-root.com/bb/main.go
 	//      import "<module1>/cmd/foo"
 	//      import "<module2>/cmd/bar"
 	//
@@ -109,11 +121,11 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	// The only way to refer to other Go modules locally is to replace them
 	// with local paths in a top-level go.mod:
 	//
-	//   tmp/go.mod
+	//   tmp/src/bb.u-root.com/bb/go.mod
 	//      package bb.u-root.com
 	//
-	//	replace <module1> => ./src/<module1>
-	//	replace <module2> => ./src/<module2>
+	//	replace <module1> => ../../<module1>
+	//	replace <module2> => ../../<module2>
 	//
 	// Because GOPATH=tmp, the source should be in $GOPATH/src, just to
 	// accommodate both build systems.
@@ -126,7 +138,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	//   tmp/src/<module2>/go.mod
 	//   tmp/src/<module2>/cmd/bar/main.go
 
-	bbDir := filepath.Join(tmpDir, "src/bb")
+	bbDir := filepath.Join(tmpDir, "src/bb.u-root.com/bb")
 	if err := os.MkdirAll(bbDir, 0755); err != nil {
 		return err
 	}
@@ -152,45 +164,21 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	for _, cmd := range cmds {
 		destination := filepath.Join(pkgDir, cmd.Pkg.PkgPath)
 
-		if err := cmd.Rewrite(destination); err != nil {
+		if err := cmd.Rewrite(destination, "bb.u-root.com/bb/pkg/bbmain"); err != nil {
 			return fmt.Errorf("rewriting command %q failed: %v", cmd.Pkg.PkgPath, err)
 		}
 		bbImports = append(bbImports, cmd.Pkg.PkgPath)
 	}
 
-	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0755); err != nil {
-		return err
-	}
-
-	bbEnv := env
-	// main.go has no outside dependencies, and the go.mod file has not
-	// been written yet, so turn off Go modules.
-	//
-	// TODO(chrisko): just parse AST and fset manually here. It'll be
-	// shared code for this and bazel that way.
-	bbEnv.GO111MODULE = "off"
-	bb, err := NewPackages(bbEnv, bbDir)
-	if err != nil {
-		return err
-	}
-	if len(bb) == 0 {
-		return fmt.Errorf("bb package not found")
-	}
-
 	// Collect and write dependencies into pkgDir.
-	hasModules, err := dealWithDeps(env, tmpDir, pkgDir, cmds)
+	hasModules, err := dealWithDeps(env, bbDir, tmpDir, pkgDir, cmds)
 	if err != nil {
 		return fmt.Errorf("dealing with deps: %v", err)
 	}
 
-	// Create bb main.go.
-	if err := CreateBBMainSource(bb[0].Pkg, bbImports, bbDir); err != nil {
-		return fmt.Errorf("creating bb main() file failed: %v", err)
+	if err := writeBBMain(bbDir, tmpDir, bbImports); err != nil {
+		return err
 	}
-
-	// We do not support non-module compilation anymore, because the u-root
-	// dependencies need modules anyway. There's literally no way around
-	// them.
 
 	// Compile bb.
 	if env.GO111MODULE == "off" || !hasModules {
@@ -198,6 +186,46 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 	if err := env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip}); err != nil {
 		return fmt.Errorf("go build: %v", err)
+	}
+	return nil
+}
+
+// writeBBMain writes $TMPDIR/src/bb.u-root.com/bb/pkg/bbmain/register.go and
+// $TMPDIR/src/bb.u-root.com/bb/main.go.
+//
+// They are taken from ./bbmain/register.go and ./bbmain/cmd/main.go, but they
+// do not retain their original import paths because the main command must be
+// in a module that doesn't conflict with any bb commands. If one were to
+// compile github.com/u-root/gobusybox/src/cmd/* into a busybox, we'd have
+// problems -- the src/go.mod would conflict with our generated go.mod, and
+// it'd be complicated to merge them. So they are transplanted into the
+// bb.u-root.com/bb module.
+func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
+	if err := os.MkdirAll(filepath.Join(bbDir, "pkg/bbmain"), 0755); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(bbDir, "pkg/bbmain/register.go"), bbRegisterSource, 0755); err != nil {
+		return err
+	}
+	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0755); err != nil {
+		return err
+	}
+
+	bbFset, bbFiles, _, err := ParseAST("main", []string{filepath.Join(bbDir, "main.go")})
+	if err != nil {
+		return err
+	}
+	if len(bbFiles) == 0 {
+		return fmt.Errorf("bb package not found")
+	}
+
+	if !astutil.RewriteImport(bbFset, bbFiles[0], "github.com/u-root/gobusybox/src/pkg/bb/bbmain", "bb.u-root.com/bb/pkg/bbmain") {
+		return fmt.Errorf("could not rewrite import")
+	}
+
+	// Create bb main.go.
+	if err := CreateBBMainSource(bbFset, bbFiles, bbImports, bbDir); err != nil {
+		return fmt.Errorf("creating bb main() file failed: %v", err)
 	}
 	return nil
 }
@@ -324,7 +352,7 @@ func moduleIdentifier(m *packages.Module) string {
 // dealWithDeps tries to suss out local files that need to be in the tree.
 //
 // It helps to have read https://golang.org/ref/mod when editing this function.
-func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
+func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*Package) (bool, error) {
 	// Module-enabled Go programs resolve their dependencies in one of two ways:
 	//
 	// - locally, if the dependency is *in* the module or there is a local replace directive
@@ -412,16 +440,16 @@ func dealWithDeps(env golang.Environ, tmpDir, pkgDir string, mainPkgs []*Package
 		//
 		// The module name is something that'll never be online, lest Go
 		// decides to go on the internet.
-		content := `module bb.u-root.com`
+		content := `module bb.u-root.com/bb`
 		for _, mpath := range localModules {
-			content += fmt.Sprintf("\nreplace %s => ./src/%s\n", mpath, mpath)
+			content += fmt.Sprintf("\nreplace %s => ../../%s\n", mpath, mpath)
 		}
 
 		// TODO(chrisko): add other go.mod files' replace and exclude
 		// directives.
 		//
 		// Warn the user if they are potentially incompatible.
-		if err := ioutil.WriteFile(filepath.Join(tmpDir, "go.mod"), []byte(content), 0755); err != nil {
+		if err := ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), []byte(content), 0755); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -488,6 +516,41 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 	})
 }
 
+// ParseAST parses the given files for a package named main.
+//
+// Only files with a matching package statement will be part of the AST
+// returned.
+func ParseAST(name string, files []string) (*token.FileSet, []*ast.File, []string, error) {
+	fset := token.NewFileSet()
+	astFiles := make(map[string]*ast.File)
+	for _, path := range files {
+		if src, err := parser.ParseFile(fset, path, nil, parser.ParseComments); err == nil && src.Name.Name == name {
+			astFiles[path] = src
+		} else if err != nil {
+			return nil, nil, nil, fmt.Errorf("failed to parse AST in file %q: %v", path, err)
+		}
+	}
+
+	// Did we parse anything?
+	if len(astFiles) == 0 {
+		return nil, nil, nil, fmt.Errorf("no valid `main` package files found in %v", files)
+	}
+
+	// The order of types.Info.InitOrder depends on this list of files
+	// always being passed to conf.Check in the same order.
+	sort.Strings(files)
+
+	sortedFiles := make([]*ast.File, 0, len(astFiles))
+	parsedFiles := make([]string, 0, len(astFiles))
+	for _, name := range files {
+		if f, ok := astFiles[name]; ok {
+			sortedFiles = append(sortedFiles, f)
+			parsedFiles = append(parsedFiles, name)
+		}
+	}
+	return fset, sortedFiles, parsedFiles, nil
+}
+
 // CreateBBMainSource creates a bb Go command that imports all given pkgs.
 //
 // p must be the bb template.
@@ -496,45 +559,15 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 //     import _ "pkg"
 //   to astp's first file.
 // - Write source file out to destDir.
-func CreateBBMainSource(p *packages.Package, pkgs []string, destDir string) error {
-	if len(p.Syntax) != 1 {
+func CreateBBMainSource(fset *token.FileSet, files []*ast.File, pkgs []string, destDir string) error {
+	if len(files) != 1 {
 		return fmt.Errorf("bb cmd template is supposed to only have one file")
 	}
 
-	bbRegisterInit := &ast.FuncDecl{
-		Name: ast.NewIdent("init"),
-		Type: &ast.FuncType{},
-		Body: &ast.BlockStmt{
-			List: []ast.Stmt{},
-		},
-	}
-
 	for _, pkg := range pkgs {
-		name := path.Base(pkg)
-		// import mangledpkg "pkg"
-		//
-		// A lot of package names conflict with code in main.go or Go keywords (e.g. init cmd)
-		astutil.AddNamedImport(p.Fset, p.Syntax[0], fmt.Sprintf("mangled%s", name), pkg)
-
-		bbRegisterInit.Body.List = append(bbRegisterInit.Body.List, &ast.ExprStmt{X: &ast.CallExpr{
-			Fun: ast.NewIdent("Register"),
-			Args: []ast.Expr{
-				// name=
-				&ast.BasicLit{
-					Kind:  token.STRING,
-					Value: strconv.Quote(name),
-				},
-				// init=
-				ast.NewIdent(fmt.Sprintf("mangled%s.Init", name)),
-				// main=
-				ast.NewIdent(fmt.Sprintf("mangled%s.Main", name)),
-			},
-		}})
-
+		astutil.AddNamedImport(fset, files[0], "_", pkg)
 	}
-
-	p.Syntax[0].Decls = append(p.Syntax[0].Decls, bbRegisterInit)
-	return writeFiles(destDir, p.Fset, p.Syntax)
+	return writeFiles(destDir, fset, files)
 }
 
 // Package is a Go package.
@@ -1021,7 +1054,7 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 }
 
 // Rewrite rewrites p into destDir as a bb package, creating an Init and Main function.
-func (p *Package) Rewrite(destDir string) error {
+func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	// This init holds all variable initializations.
 	//
 	// func Init0() {}
@@ -1053,7 +1086,38 @@ func (p *Package) Rewrite(destDir string) error {
 		varInit.Body.List = append(varInit.Body.List, a)
 	}
 
-	mainFile.Decls = append(mainFile.Decls, varInit, p.init)
+	// import bbmain "bbImportPath"
+	//
+	// TODO(dedup this name)
+	astutil.AddNamedImport(p.Pkg.Fset, mainFile, "bbmain", bbImportPath)
+
+	// func init() {
+	//   bbmain.Register("p.name", Init, Main)
+	// }
+	bbRegisterSelf := &ast.FuncDecl{
+		Name: ast.NewIdent("init"),
+		Type: &ast.FuncType{},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.ExprStmt{X: &ast.CallExpr{
+					Fun: ast.NewIdent("bbmain.Register"),
+					Args: []ast.Expr{
+						// name=
+						&ast.BasicLit{
+							Kind:  token.STRING,
+							Value: strconv.Quote(p.Name),
+						},
+						// init=
+						ast.NewIdent("Init"),
+						// main=
+						ast.NewIdent("Main"),
+					},
+				}},
+			},
+		},
+	}
+
+	mainFile.Decls = append(mainFile.Decls, varInit, p.init, bbRegisterSelf)
 
 	return writePkg(p.Pkg, destDir)
 }
