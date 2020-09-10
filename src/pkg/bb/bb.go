@@ -873,7 +873,8 @@ func (p *Package) funcNameTaken(name string) bool {
 	return false
 }
 
-// newImport is a shitty name generator. Help.
+// newImport checks whether name can be used as a new import alias in f, and if
+// it can't, returns a different usable name.
 func (p *Package) newImport(name string, f *ast.File) string {
 	var i int
 	proposed := name
@@ -884,8 +885,6 @@ func (p *Package) newImport(name string, f *ast.File) string {
 	return proposed
 }
 
-// TODO:
-// - write an init name generator, in case InitN is already taken.
 func (p *Package) rewriteFile(f *ast.File) bool {
 	hasMain := false
 
@@ -1087,9 +1086,8 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	}
 
 	// import bbmain "bbImportPath"
-	//
-	// TODO(dedup this name)
-	astutil.AddNamedImport(p.Pkg.Fset, mainFile, "bbmain", bbImportPath)
+	importName := p.newImport("bbmain", mainFile)
+	astutil.AddNamedImport(p.Pkg.Fset, mainFile, importName, bbImportPath)
 
 	// func init() {
 	//   bbmain.Register("p.name", Init, Main)
@@ -1100,7 +1098,7 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 		Body: &ast.BlockStmt{
 			List: []ast.Stmt{
 				&ast.ExprStmt{X: &ast.CallExpr{
-					Fun: ast.NewIdent("bbmain.Register"),
+					Fun: ast.NewIdent(fmt.Sprintf("%s.Register", importName)),
 					Args: []ast.Expr{
 						// name=
 						&ast.BasicLit{
