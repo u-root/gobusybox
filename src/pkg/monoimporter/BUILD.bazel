@@ -6,7 +6,7 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/pkg/monoimporter",
     visibility = ["//visibility:public"],
     deps = [
-        "//pkg/bb",
+        "//pkg/bb/bbinternal",
         "@org_golang_x_tools//go/gcexportdata",
         "@org_golang_x_tools//go/packages",
     ],

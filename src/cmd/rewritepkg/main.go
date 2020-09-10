@@ -13,7 +13,7 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/u-root/gobusybox/src/pkg/bb"
+	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
 	"github.com/u-root/gobusybox/src/pkg/monoimporter"
 	"github.com/u-root/gobusybox/src/pkg/uflag"
 )
@@ -89,7 +89,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	bbPkg := bb.NewPackage(*name, p)
+	bbPkg := bbinternal.NewPackage(*name, p)
 	if err := bbPkg.Rewrite(*destDir, *bbImportPath); err != nil {
 		log.Fatal(err)
 	}
