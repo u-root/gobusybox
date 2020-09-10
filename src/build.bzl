@@ -75,6 +75,8 @@ def __go_busybox_library(ctx):
     for archive in go.stdlib.libs:
         args.add("--archive", archive.path)
 
+    args.add("--bb_import_path", "github.com/u-root/gobusybox/src/pkg/bb/bbmain")
+
     depInputs = []
     depTargets = []
     for dep in ctx.attr.deps:
@@ -187,7 +189,7 @@ def go_busybox_library(name, srcs, importpath, deps = [], **kwargs):
         srcs = srcs,
         command_name = name,
         importpath = importpath,
-        deps = deps,
+        deps = deps + ["//pkg/bb/bbmain"],
         **kwargs
     )
 
@@ -307,7 +309,7 @@ def go_busybox_binary(name, commands = [], **kwargs):
         # Strip all debug symbols.
         gc_linkopts = ["-s", "-w"],
         pure = "on",
-        deps = cmds + ["//pkg/bb"],
+        deps = cmds + ["//pkg/bb/bbmain"],
         **kwargs
     )
 
@@ -315,6 +317,6 @@ def go_busybox_binary(name, commands = [], **kwargs):
         name = "%s_debug" % name,
         srcs = [":%s_gen_main" % name],
         pure = "on",
-        deps = cmds + ["//pkg/bb"],
+        deps = cmds + ["//pkg/bb/bbmain"],
         **kwargs
     )

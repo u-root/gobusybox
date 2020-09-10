@@ -11,6 +11,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	// There MUST NOT be any other dependencies here.
+	//
+	// It is preferred to copy minimal code necessary into this file, as
+	// dependency management for this main file is... hard.
 )
 
 // ErrNotRegistered is returned by Run if the given command is not registered.

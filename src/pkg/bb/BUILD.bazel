@@ -5,6 +5,7 @@ go_library(
     srcs = [
         "bb.go",
         "bbmain_src.go",
+        "bbregister_src.go",
         "generate.go",
     ],
     importpath = "github.com/u-root/gobusybox/src/pkg/bb",

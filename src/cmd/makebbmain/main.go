@@ -12,9 +12,7 @@ import (
 	"os"
 
 	"github.com/u-root/gobusybox/src/pkg/bb"
-	"github.com/u-root/gobusybox/src/pkg/monoimporter"
 	"github.com/u-root/gobusybox/src/pkg/uflag"
-	"golang.org/x/tools/go/packages"
 )
 
 var (
@@ -32,19 +30,14 @@ func init() {
 func main() {
 	flag.Parse()
 
-	fset, astp, _, err := monoimporter.ParseAST("main", pkgFiles)
+	fset, astp, _, err := bb.ParseAST("main", pkgFiles)
 	if err != nil {
 		log.Fatal(err)
 	}
-	p := &packages.Package{
-		Fset:   fset,
-		Syntax: astp,
-	}
-
 	if err := os.MkdirAll(*destDir, 0755); err != nil {
 		log.Fatal(err)
 	}
-	if err := bb.CreateBBMainSource(p, commands, *destDir); err != nil {
+	if err := bb.CreateBBMainSource(fset, astp, commands, *destDir); err != nil {
 		log.Fatal(err)
 	}
 }
