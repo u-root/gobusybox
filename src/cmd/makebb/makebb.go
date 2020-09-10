@@ -13,7 +13,6 @@ import (
 
 	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
-	//"github.com/u-root/u-root/pkg/uroot"
 )
 
 var outputPath = flag.String("o", "bb", "Path to busybox binary")
@@ -31,13 +30,6 @@ func main() {
 	l.Printf("Build environment: %s", env)
 
 	pkgs := flag.Args()
-	/*	if len(pkgs) == 0 {
-			pkgs = []string{"github.com/u-root/u-root/cmds/"}
-		}
-		pkgs, err := uroot.ResolvePackagePaths(l, env, pkgs)
-		if err != nil {
-			l.Fatal(err)
-		}*/
 
 	o, err := filepath.Abs(*outputPath)
 	if err != nil {
