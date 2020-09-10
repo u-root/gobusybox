@@ -272,8 +272,10 @@ func Load(pkgPath string, filepaths []string, importer types.Importer) (*package
 	}
 
 	p.TypesInfo = &types.Info{
-		// If you don't make this map before passing TypesInfo to Check, it won't be filled in.
-		Types: make(map[ast.Expr]types.TypeAndValue),
+		// If you don't make these maps before passing TypesInfo to
+		// Check, they won't be filled in.
+		Types:  make(map[ast.Expr]types.TypeAndValue),
+		Scopes: make(map[ast.Node]*types.Scope),
 	}
 	// It's important that p.Syntax be in the same order every time for
 	// p.TypesInfo to be stable.

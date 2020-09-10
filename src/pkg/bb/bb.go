@@ -754,7 +754,12 @@ func NewPackage(name string, p *packages.Package) *Package {
 }
 
 func (p *Package) nextInit(addToCallList bool) *ast.Ident {
-	i := ast.NewIdent(fmt.Sprintf("Init%d", p.initCount))
+	nextInitName := fmt.Sprintf("busyboxInit%d", p.initCount)
+	for p.funcNameTaken(nextInitName) {
+		p.initCount++
+		nextInitName = fmt.Sprintf("busyboxInit%d", p.initCount)
+	}
+	i := ast.NewIdent(nextInitName)
 	if addToCallList {
 		p.init.Body.List = append(p.init.Body.List, &ast.ExprStmt{X: &ast.CallExpr{Fun: i}})
 	}
@@ -794,6 +799,56 @@ func importName(p *packages.Package, typePkgPath string) string {
 	}
 	// It doesn't appear. We'll go import it.
 	return typePkgPath
+}
+
+// pkgImportNameTaken checks whether name would conflict with any existing
+// imports in f or variable/const/func declarations in p.
+//
+// Import statements may conflict with import statements in other files in
+// the same package.
+func (p *Package) pkgImportNameTaken(name string, f *ast.File) bool {
+	// package scope is all variable, const, and func names
+	if p.Pkg.Types.Scope().Lookup(name) != nil {
+		return true
+	}
+
+	// file scope is imports. Only imports from this file can conflict.
+	// Imports in other files have no effect.
+	if p.Pkg.TypesInfo.Scopes[f].Lookup(name) != nil {
+		return true
+	}
+	return false
+}
+
+// funcNameTaken checks whether name would conflict with any
+// import/variable/const/func declarations in all of p.
+//
+// Variable/const/func names may not conflict with import statements in
+// other files of the same package!
+func (p *Package) funcNameTaken(name string) bool {
+	// package scope is all variable, const, and func names
+	if p.Pkg.Types.Scope().Lookup(name) != nil {
+		return true
+	}
+
+	// file scope is all imports
+	for _, file := range p.Pkg.Syntax {
+		if p.Pkg.TypesInfo.Scopes[file].Lookup(name) != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// newImport is a shitty name generator. Help.
+func (p *Package) newImport(name string, f *ast.File) string {
+	var i int
+	proposed := name
+	for p.pkgImportNameTaken(proposed, f) {
+		proposed = fmt.Sprintf("%s%d", name, i)
+		i++
+	}
+	return proposed
 }
 
 // TODO:
@@ -854,10 +909,12 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		//
 		// Then it's possible the `log` package was not referred to at
 		// all previously, and we now need to add an import for log.
-		astutil.AddImport(p.Pkg.Fset, f, importPath)
+		importAlias := p.newImport(pkg.Name(), f)
+		astutil.AddNamedImport(p.Pkg.Fset, f, importAlias, importPath)
 		// Make sure we do not add this import twice.
-		unaliasedImports[importPath] = struct{}{}
-		return pkg.Name()
+		importAliases[importPath] = importAlias
+
+		return importAlias
 	}
 
 	for _, decl := range f.Decls {
@@ -923,6 +980,8 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	// Now we change any import names attached to package declarations. We
 	// just upcase it for now; it makes it easy to look in bbsh for things
 	// we changed, e.g. grep -r bbsh Import is useful.
+	//
+	// TODO(chrisko): We don't have to do this anymore.
 	for _, cg := range f.Comments {
 		for _, c := range cg.List {
 			if strings.HasPrefix(c.Text, "// import") {
