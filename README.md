@@ -9,7 +9,7 @@ one binary. The resulting binary uses its invocation arguments (`os.Args`) to
 determine which command is being called.
 
 Go Busybox works with Go 1.13+. It is well-tested with Linux on arm, arm64, and
-amd64.
+amd64. It supports Go modules, Go vendoring, and bazel.
 
 An example:
 
@@ -50,6 +50,12 @@ git clone https://github.com/gokrazy/gokrazy
 
 makebb ./p9/cmd/* ./gokrazy/cmd/*
 ```
+
+### APIs
+
+Besides the makebb CLI command, there is a
+[Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb@master)
+and bazel rules in [src/gobb.bzl](src/gobb.bzl).
 
 ### Shortcomings
 
