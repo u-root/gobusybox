@@ -37,10 +37,16 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - build-external-gopath:
+          requires:
+            - build-gopath
       - build-gomod:
           requires:
             - clean-makebb
             - clean-gomod
+      - build-external-gomod:
+          requires:
+            - build-gomod
       - build-bazel:
           requires:
             - clean-bazel
@@ -110,6 +116,11 @@ jobs:
       - run:
           name: gobuilds-gopath
           command: ./gobuilds-gopath.sh
+
+  build-external-gopath:
+    <<: *gopath-template
+    steps:
+      - checkout
       - run:
           name: build u-root (vendored)
           command: |
@@ -185,6 +196,14 @@ jobs:
       - run:
           name: gobuilds
           command: ./gobuilds.sh
+
+  build-external-gomod:
+    <<: *gomod-template
+    steps:
+      - checkout
+      - run:
+          name: build u-root & u-bmc & gokrazy & p9
+          command: ./test-external.sh
 
   clean-bazel:
     <<: *bazel-template
