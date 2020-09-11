@@ -10,14 +10,16 @@ test/diamonddep/mod2/exthello: test/diamonddep/mod2/exthello: test/diamonddep/mo
 
 for GO111MODULE in on auto;
 do
-  GO111MODULE=$GO111MODULE $MAKEBB ./mod1/cmd/*
-  test -f ./bb || exit 1
+  GO111MODULE=$GO111MODULE $MAKEBB -o bb-$GO111MODULE ./mod1/cmd/*
+  test -f ./bb-$GO111MODULE
 
-  HW=$(./bb helloworld);
+  HW=$(./bb-$GO111MODULE helloworld);
   test "$HW" == "hello world" || (echo "helloworld not right" && exit 1)
 
-  HWDEPS=$(./bb hellowithdep);
+  HWDEPS=$(./bb-$GO111MODULE hellowithdep);
   test "$HWDEPS" == "$WANT" || (echo "hellowithdep not right" && exit 1)
-
-  rm ./bb
 done
+
+# check reproducible
+cmp bb-on bb-auto
+rm bb-on bb-auto

@@ -45,8 +45,12 @@ echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/u-bmc/go.mod
 # Make p9 use local u-root.
 echo "replace github.com/u-root/u-root => ../u-root" >> $TMPDIR/p9/go.mod
 
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb -o bb1 $TMPDIR/u-root/cmds/*/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb -o bb2 $TMPDIR/u-root/cmds/*/*
+
+cmp bb1 bb2 || (echo "building u-root is not reproducible" && exit 1)
+rm bb1 bb2
+
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
 GOARM=5 GOARCH=arm GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/core/* $TMPDIR/u-bmc/cmd/* $TMPDIR/u-bmc/platform/quanta-f06-leopard-ddr3/cmd/*
 
@@ -63,5 +67,6 @@ function ctrl_c() {
 trap ctrl_c INT
 
 (cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
-GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb github.com/u-root/u-root/cmds/...
+GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 github.com/u-root/u-root/cmds/...
+
 rm -rf $GOPATH_TMPDIR

@@ -7,12 +7,10 @@ MAKEBB=../../src/cmd/makebb/makebb
 # This uses the go.mod in src/
 for GO111MODULE in on auto;
 do
-  GO111MODULE=$GO111MODULE $MAKEBB ./cmd/dmesg ./cmd/strace
-  test -f ./bb || exit 1
-  rm ./bb
-
-  # nested modules
-  GO111MODULE=$GO111MODULE $MAKEBB ./cmd/dmesg ./cmd/strace ./nestedmod/cmd/p9ufs
-  test -f ./bb || exit 1
-  rm ./bb
+  GO111MODULE=$GO111MODULE $MAKEBB -o bb-$GO111MODULE ./cmd/dmesg ./cmd/strace ./nestedmod/cmd/p9ufs
+  test -f ./bb-$GO111MODULE
 done
+
+# check reproducible
+cmp bb-on bb-auto
+rm bb-on bb-auto

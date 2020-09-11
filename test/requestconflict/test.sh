@@ -22,9 +22,12 @@ echo "replace github.com/u-root/gobusybox/test/requestconflict/mod6 => ../mod6" 
 
 for GO111MODULE in on auto;
 do
-  GO111MODULE=$GO111MODULE $MAKEBB ./mod5/cmd/mod5hello ./mod6/cmd/mod6hello
-  test -f ./bb
-  rm ./bb
+  GO111MODULE=$GO111MODULE $MAKEBB -o bb-$GO111MODULE ./mod5/cmd/mod5hello ./mod6/cmd/mod6hello
+  test -f ./bb-$GO111MODULE
 done
+
+# check reproducible
+cmp bb-on bb-auto
+rm bb-on bb-auto
 
 mv ./mod5/go.mod.hold ./mod5/go.mod
