@@ -6,11 +6,13 @@ MAKEBB=../../src/cmd/makebb/makebb
 
 for GO111MODULE in on auto;
 do
-  GO111MODULE=$GO111MODULE $MAKEBB ./cmd/loghello
-  test -f ./bb || exit 1
+  GO111MODULE=$GO111MODULE $MAKEBB -o bb-$GO111MODULE ./cmd/loghello
+  test -f ./bb-$GO111MODULE
 
-  HW=$(./bb loghello 2>&1);
+  HW=$(./bb-$GO111MODULE loghello 2>&1);
   test "$HW" == "Log Hello" || (echo "loghello not right" && exit 1)
-
-  rm ./bb
 done
+
+# check reproducible
+cmp bb-on bb-auto
+rm bb-on bb-auto
