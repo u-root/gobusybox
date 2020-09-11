@@ -159,7 +159,9 @@ _go_busybox_library = go_rule(
             allow_files = True,
             default = Label("//cmd/rewritepkg"),
         ),
+        "_go_context_data": attr.label(default = "@io_bazel_rules_go//:go_context_data"),
     },
+    toolchains = ["@io_bazel_rules_go//go:toolchain"],
     implementation = __go_busybox_library,
 )
 

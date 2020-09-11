@@ -1,5 +1,7 @@
 load("//:gobb.bzl", "go_busybox_binary")
+load("//:gobb2.bzl", "go_busybox")
 load("@bazel_gazelle//:def.bzl", "gazelle")
+load("//:static_test.bzl", "static_test")
 
 # gazelle:prefix github.com/u-root/gobusybox/src
 # gazelle:go_naming_convention import
@@ -12,6 +14,47 @@ go_busybox_binary(
         "//bazeltest/cmd/importsamename:importsamename_lib",
         "//bazeltest/cmd/implicitimport:implicitimport_lib",
     ],
+)
+
+go_busybox(
+    name = "bb2",
+    cmds = [
+        "//bazeltest/cmd/dmesg",
+        "//bazeltest/cmd/helloworld",
+        "//bazeltest/cmd/implicitimport",
+        "//bazeltest/cmd/importsamename",
+        "//cmd/embedvar",
+    ],
+)
+
+go_busybox(
+    name = "bb2_arm64",
+    cmds = [
+        "//bazeltest/cmd/dmesg",
+        "//bazeltest/cmd/helloworld",
+        "//bazeltest/cmd/implicitimport",
+        "//bazeltest/cmd/importsamename",
+        "//cmd/embedvar",
+    ],
+    goarch = "arm64",
+    goos = "linux",
+    pure = "on",
+)
+
+static_test(
+    name = "bb2_static_test",
+    target = ":bb2",
+)
+
+static_test(
+    name = "bb2_arm64_static_test",
+    target = ":bb2_arm64",
+)
+
+sh_library(
+    name = "static_test",
+    srcs = [":static_test.sh"],
+    visibility = ["//visibility:public"],
 )
 
 gazelle(
