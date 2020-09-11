@@ -23,6 +23,7 @@ var (
 	pkg           = flag.String("package", "", "Go import package path")
 	destDir       = flag.String("dest_dir", "", "Destination directory")
 	goarch        = flag.String("goarch", "", "override GOARCH of the resulting busybox")
+	goos          = flag.String("goos", "", "override GOOS of the resulting busybox")
 	installSuffix = flag.String("install_suffix", "", "override installsuffix of the resulting busybox")
 	bbImportPath  = flag.String("bb_import_path", "", "BB import path")
 	gorootDir     uflag.Strings
@@ -40,12 +41,17 @@ func main() {
 	flag.Parse()
 
 	if len(*name) == 0 {
-		log.Fatal("rewrite_ast: no command name given")
+		log.Fatal("rewritepkg: no command name given")
+	} else if len(*destDir) == 0 {
+		log.Fatal("rewritepkg: no directory given")
 	}
 
 	c := build.Default
 	if *goarch != "" {
 		c.GOARCH = *goarch
+	}
+	if *goos != "" {
+		c.GOOS = *goos
 	}
 	if *installSuffix != "" {
 		c.InstallSuffix = *installSuffix
@@ -62,7 +68,7 @@ func main() {
 		if ok {
 			gofiles = append(gofiles, path)
 		} else if err != nil {
-			log.Fatal(err)
+			log.Fatalf("MatchFile failed: %v", err)
 		} else {
 			b, err := ioutil.ReadFile(path)
 			if err != nil {
@@ -74,7 +80,7 @@ func main() {
 			// compiler will automagically exclude it based on the
 			// same build tags.
 			if err := ioutil.WriteFile(filepath.Join(*destDir, basename), b, 0644); err != nil {
-				log.Fatal(err)
+				log.Fatalf("Write empty file: %v", err)
 			}
 		}
 	}
@@ -91,6 +97,6 @@ func main() {
 
 	bbPkg := bbinternal.NewPackage(*name, p)
 	if err := bbPkg.Rewrite(*destDir, *bbImportPath); err != nil {
-		log.Fatal(err)
+		log.Fatalf("Rewriting failed: %v", err)
 	}
 }

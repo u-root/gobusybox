@@ -248,7 +248,13 @@ jobs:
       - checkout
       - run:
           name: build busybox
-          command: cd src && bazel build //:bb
+          command: |
+            cd src
+            bazel build //:bb
+            bazel build //:bb2
+            ./bazel-bin/bb2_/bb2 helloworld
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:bb2
+            bazel build //:bb2_arm64
       - run:
           name: build everything
           command: cd src && bazel build //...
