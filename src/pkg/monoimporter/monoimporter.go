@@ -13,7 +13,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
@@ -27,6 +26,9 @@ type finder interface {
 
 func find(finders []finder, pkg string) io.ReadCloser {
 	for _, f := range finders {
+		if f == nil {
+			continue
+		}
 		if file := f.findAndOpen(pkg); file != nil {
 			return file
 		}
@@ -54,11 +56,11 @@ func newZipReader(stdlib *zip.Reader, ctxt build.Context) *zipReader {
 	return z
 }
 
-// thatOneString is the Go build context directory name used by
+// goEnvDir is the Go build context directory name used by
 // blaze/bazel/buck/Go.
 //
 // GOOS_GOARCH[_InstallSuffix], e.g. linux_amd64 or linux_amd64_pure.
-func thatOneString(ctxt build.Context) string {
+func goEnvDir(ctxt build.Context) string {
 	var suffix string
 	if len(ctxt.InstallSuffix) > 0 {
 		suffix = fmt.Sprintf("_%s", ctxt.InstallSuffix)
@@ -67,7 +69,8 @@ func thatOneString(ctxt build.Context) string {
 }
 
 func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
-	name := fmt.Sprintf("%s/%s.x", thatOneString(z.ctxt), pkg)
+	pkg = strings.TrimPrefix(pkg, "google3/")
+	name := fmt.Sprintf("%s/%s.x", goEnvDir(z.ctxt), pkg)
 	f, ok := z.files[name]
 	if !ok {
 		return nil
@@ -79,10 +82,84 @@ func (z *zipReader) findAndOpen(pkg string) io.ReadCloser {
 	return rc
 }
 
-type archives struct {
-	ctxt  build.Context
-	archs []string
+// stdlibArchives is for bazel Go standard library archive files.
+type stdlibArchives struct {
+	ctxt build.Context
 
+	// archs is a list of either directory containing Go .a archives, or .a
+	// archive file paths.
+	//
+	// When target==default GOARCH/GOOS/cgo config, bazel will pass a list
+	// of stdlib .a archive file paths.
+	//
+	// When target is not the default Go env, bazel will likely pass just a
+	// stdlib directory path.
+	//
+	// (This is just from observation. I'm not 100% sure.)
+	archs []string
+}
+
+// bazel Starlark rules pass stdlib .a files one of two ways: either as a list
+// of individual files (e.g. linux_amd64/math/rand.a), or as just a directory
+// name.
+func (a stdlibArchives) findAndOpen(pkg string) io.ReadCloser {
+	// bazel stdlib archives should be found using this method.
+	//
+	// bazel prefers .a files.
+	name := fmt.Sprintf("/%s/%s.a", goEnvDir(a.ctxt), pkg)
+
+	for _, filename := range a.archs {
+		// If bazel passed just a directory name, this should find the
+		// file.
+		if fi, err := os.Stat(filename); err == nil && fi.IsDir() {
+			f, err := os.Open(filepath.Join(filename, name))
+			if err == nil {
+				return f
+			}
+		}
+		// If bazel passed individual file names, check the suffix.
+		if strings.HasSuffix(filename, name) {
+			ar, err := os.Open(filename)
+			if err == nil {
+				return ar
+			}
+		}
+	}
+	return nil
+}
+
+// unmappedArchives is for blaze non-stdlib dependencies, whose file path lets
+// us derive their Go import path.
+type unmappedArchives struct {
+	// archs is a list .a archive file paths, where import path == package
+	// path.
+	archs []string
+}
+
+func (a unmappedArchives) findAndOpen(pkg string) io.ReadCloser {
+	pkg = strings.TrimPrefix(pkg, "google3/")
+
+	// in blaze, pkg path == file path, and we prefer .x
+	//
+	// I honestly do not know why .a files work in bazel, but not
+	// in blaze. I don't even know the difference.
+	name := fmt.Sprintf("/%s.x", pkg)
+
+	for _, filename := range a.archs {
+		if strings.HasSuffix(filename, name) {
+			ar, err := os.Open(filename)
+			if err == nil {
+				return ar
+			}
+		}
+	}
+	return nil
+}
+
+// mappedArchives is for bazel non-stdlib dependencies.
+//
+// bazel Starlark rules pass a list of goImportPath:goArchiveFile.
+type mappedArchives struct {
 	// pkgs is a map of Go import path -> archive file.
 	//
 	// While in blaze, importPath == file path, in bazel each package gets
@@ -90,7 +167,8 @@ type archives struct {
 	pkgs map[string]string
 }
 
-func (a archives) findAndOpen(pkg string) io.ReadCloser {
+// bazel Starlark rules pass a list of Go import path -> archive file path.
+func (a mappedArchives) findAndOpen(pkg string) io.ReadCloser {
 	// In bazel, non-stdlib dependencies should be found through this,
 	// because we pass an explicit map of import path -> archive path from
 	// the Starlark rules.
@@ -98,35 +176,6 @@ func (a archives) findAndOpen(pkg string) io.ReadCloser {
 		f, err := os.Open(filename)
 		if err == nil {
 			return f
-		}
-	}
-
-	suffixes := []string{
-		// bazel stdlib archives should be found using this method.
-		fmt.Sprintf("%s/%s.x", thatOneString(a.ctxt), pkg),
-		fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg),
-
-		// blaze finds non-stdlib dependency archives through this, and
-		// uses a zip for the stdlib files.
-		fmt.Sprintf("%s/%s.x", thatOneString(a.ctxt), pkg),
-		fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg),
-	}
-
-	for _, s := range a.archs {
-		if fi, err := os.Stat(s); err == nil && fi.IsDir() {
-			name := fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg)
-			f, err := os.Open(filepath.Join(s, name))
-			if err == nil {
-				return f
-			}
-		}
-		for _, suffix := range suffixes {
-			if strings.HasSuffix(s, suffix) {
-				ar, err := os.Open(s)
-				if err == nil {
-					return ar
-				}
-			}
 		}
 	}
 	return nil
@@ -145,12 +194,13 @@ type Importer struct {
 	// imports is a cache of imported packages.
 	imports map[string]*types.Package
 
-	// archives is a list of paths to compiled Go package archives.
-	archives archives
+	mapped   *mappedArchives
+	unmapped *unmappedArchives
+	stdlib   *stdlibArchives
 
-	// stdlib is an archive reader for standard library package object
+	// stdlibZip is an archive reader for standard library package object
 	// files.
-	stdlib *zipReader
+	stdlibZip *zipReader
 }
 
 // NewFromZips returns a new monorepo importer, using the build context to pick
@@ -159,14 +209,15 @@ type Importer struct {
 // zips refers to zip file paths with Go standard library object files.
 //
 // archives refers to directories in which to find compiled Go package object files.
-func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importer, error) {
+func NewFromZips(ctxt build.Context, unmappedArchs, mappedArchs, stdlibArchs, stdlibZips []string) (*Importer, error) {
 	// Some architectures have extra stuff after the GOARCH in the stdlib filename.
 	ctxtWithWildcard := ctxt
 	ctxtWithWildcard.GOARCH += "*"
 
 	var stdlib *zip.Reader
-	wantPattern := fmt.Sprintf("%s.x.zip", thatOneString(ctxtWithWildcard))
-	for _, dir := range zips {
+	// blaze may pass more than one zip file, each for different environments.
+	wantPattern := fmt.Sprintf("%s.x.zip", goEnvDir(ctxtWithWildcard))
+	for _, dir := range stdlibZips {
 		if matched, err := filepath.Match(wantPattern, filepath.Base(dir)); err != nil {
 			log.Printf("Error with pattern %q: %v", wantPattern, err)
 		} else if matched {
@@ -179,44 +230,38 @@ func NewFromZips(ctxt build.Context, archives []string, zips []string) (*Importe
 		}
 	}
 
-	// Reverse-sort the archives so that *.x is listed before *.a in
-	// blaze-based archive searching.
-	//
-	// bazel Go rules only pass *.a, which is fine for bazel.
-	// blaze Go rules pass both *.x and *.a, and we need to prefer *.x.
-	sort.Sort(sort.Reverse(sort.StringSlice(archives)))
-	return New(ctxt, archives, stdlib), nil
+	ma := &mappedArchives{
+		pkgs: make(map[string]string),
+	}
+	for _, archive := range mappedArchs {
+		nameAndFile := strings.Split(archive, ":")
+		if len(nameAndFile) != 2 {
+			return nil, fmt.Errorf("archive %q is not goImportPath:goArchiveFilePath", nameAndFile)
+		}
+		ma.pkgs[nameAndFile[0]] = nameAndFile[1]
+	}
+	sa := &stdlibArchives{
+		ctxt:  ctxt,
+		archs: stdlibArchs,
+	}
+	ua := &unmappedArchives{archs: unmappedArchs}
+
+	return New(ctxt, ua, ma, sa, stdlib), nil
 }
 
 // New returns a new monorepo importer.
-func New(ctxt build.Context, archs []string, stdlib *zip.Reader) *Importer {
-	pkgs := make(map[string]string)
-	var unnamedArchives []string
-	for _, archive := range archs {
-		nameAndFile := strings.Split(archive, ":")
-		switch len(nameAndFile) {
-		case 0:
-			continue
-		case 1:
-			unnamedArchives = append(unnamedArchives, archive)
-		case 2:
-			pkgs[nameAndFile[0]] = nameAndFile[1]
-		}
-	}
-
+func New(ctxt build.Context, ua *unmappedArchives, ma *mappedArchives, sa *stdlibArchives, stdlibZip *zip.Reader) *Importer {
 	i := &Importer{
 		imports: map[string]*types.Package{
 			"unsafe": types.Unsafe,
 		},
-		fset: token.NewFileSet(),
-		archives: archives{
-			ctxt:  ctxt,
-			archs: unnamedArchives,
-			pkgs:  pkgs,
-		},
+		fset:     token.NewFileSet(),
+		mapped:   ma,
+		stdlib:   sa,
+		unmapped: ua,
 	}
-	if stdlib != nil {
-		i.stdlib = newZipReader(stdlib, ctxt)
+	if stdlibZip != nil {
+		i.stdlibZip = newZipReader(stdlibZip, ctxt)
 	}
 	return i
 }
@@ -227,12 +272,13 @@ func (i *Importer) Import(importPath string) (*types.Package, error) {
 		return pkg, nil
 	}
 
-	pkg := strings.TrimPrefix(importPath, "google3/")
-	finders := []finder{i.archives}
-	if i.stdlib != nil {
-		finders = append(finders, i.stdlib)
+	finders := []finder{
+		i.mapped,
+		i.unmapped,
+		i.stdlib,
+		i.stdlibZip,
 	}
-	file := find(finders, pkg)
+	file := find(finders, importPath)
 	if file == nil {
 		return nil, fmt.Errorf("package %q not found", importPath)
 	}

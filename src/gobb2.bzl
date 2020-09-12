@@ -64,7 +64,7 @@ def _go_busybox_library(ctx):
 
     go = go_context(ctx)
     for archive in go.stdlib.libs:
-        args.add("--archive", archive.path)
+        args.add("--stdlib_archive", archive.path)
 
     output_dir = None
     outputs = []
@@ -75,12 +75,12 @@ def _go_busybox_library(ctx):
 
     importpath = ctx.attr.cmd[GoLibrary].importpath
     for deparchive in ctx.attr.cmd[GoArchive].direct:
-        args.add("--archive", "%s:%s" % (deparchive.data.importpath, deparchive.data.file.path))
+        args.add("--mapped_archive", "%s:%s" % (deparchive.data.importpath, deparchive.data.file.path))
         depInputs.append(deparchive.data.file)
 
     # Transitive dependencies of the direct dependency.
     for tdep in ctx.attr.cmd[GoArchive].transitive.to_list():
-        args.add("--archive", "%s:%s" % (tdep.importpath, tdep.file.path))
+        args.add("--mapped_archive", "%s:%s" % (tdep.importpath, tdep.file.path))
         depInputs.append(tdep.file)
 
     transitiveDepTargets = ctx.attr.cmd[GoDepInfo].targets
