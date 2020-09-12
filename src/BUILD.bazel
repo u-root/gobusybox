@@ -141,7 +141,6 @@ uroot_linux_core_cmds = [
     "@com_github_u-root_u-root//cmds/core/sluinit",
     "@com_github_u-root_u-root//cmds/core/sort",
     "@com_github_u-root_u-root//cmds/core/sshd",
-    "@com_github_u-root_u-root//cmds/core/strace",
     "@com_github_u-root_u-root//cmds/core/strings",
     "@com_github_u-root_u-root//cmds/core/stty",
     "@com_github_u-root_u-root//cmds/core/switch_root",
@@ -164,6 +163,10 @@ uroot_linux_core_cmds = [
     "@com_github_u-root_u-root//cmds/core/yes",
 ]
 
+uroot_linux_core_cmds_amd64only = [
+    "@com_github_u-root_u-root//cmds/core/strace",
+]
+
 uroot_linux_boot_cmds = [
     "@com_github_u-root_u-root//cmds/boot/boot",
     "@com_github_u-root_u-root//cmds/boot/fbnetboot",
@@ -173,7 +176,62 @@ uroot_linux_boot_cmds = [
     "@com_github_u-root_u-root//cmds/boot/systemboot",
 ]
 
+uroot_linux_exp_cmds = [
+    "@com_github_u-root_u-root//cmds/exp/acpicat",
+    "@com_github_u-root_u-root//cmds/exp/acpigrep",
+    "@com_github_u-root_u-root//cmds/exp/ansi",
+    "@com_github_u-root_u-root//cmds/exp/ash",
+    "@com_github_u-root_u-root//cmds/exp/bootvars",
+    "@com_github_u-root_u-root//cmds/exp/builtin",
+    "@com_github_u-root_u-root//cmds/exp/bzimage",
+    "@com_github_u-root_u-root//cmds/exp/cbmem",
+    "@com_github_u-root_u-root//cmds/exp/cksum",
+    "@com_github_u-root_u-root//cmds/exp/console",
+    "@com_github_u-root_u-root//cmds/exp/crc",
+    "@com_github_u-root_u-root//cmds/exp/disk_unlock",
+    "@com_github_u-root_u-root//cmds/exp/dmidecode",
+    "@com_github_u-root_u-root//cmds/exp/ectool",
+    "@com_github_u-root_u-root//cmds/exp/ed",
+    "@com_github_u-root_u-root//cmds/exp/esxiboot",
+    "@com_github_u-root_u-root//cmds/exp/fdtdump",
+    "@com_github_u-root_u-root//cmds/exp/field",
+    "@com_github_u-root_u-root//cmds/exp/fixrsdp",
+    "@com_github_u-root_u-root//cmds/exp/forth",
+    "@com_github_u-root_u-root//cmds/exp/freq",
+    "@com_github_u-root_u-root//cmds/exp/getty",
+    "@com_github_u-root_u-root//cmds/exp/hdparm",
+    "@com_github_u-root_u-root//cmds/exp/ipmidump",
+    "@com_github_u-root_u-root//cmds/exp/madeye",
+    "@com_github_u-root_u-root//cmds/exp/modprobe",
+    "@com_github_u-root_u-root//cmds/exp/newsshd",
+    "@com_github_u-root_u-root//cmds/exp/page",
+    "@com_github_u-root_u-root//cmds/exp/partprobe",
+    "@com_github_u-root_u-root//cmds/exp/pflask",
+    "@com_github_u-root_u-root//cmds/exp/pogosh",
+    "@com_github_u-root_u-root//cmds/exp/pox",
+    "@com_github_u-root_u-root//cmds/exp/pxeserver",
+    "@com_github_u-root_u-root//cmds/exp/readpe",
+    "@com_github_u-root_u-root//cmds/exp/run",
+    "@com_github_u-root_u-root//cmds/exp/rush",
+    "@com_github_u-root_u-root//cmds/exp/smn",
+    "@com_github_u-root_u-root//cmds/exp/srvfiles",
+    "@com_github_u-root_u-root//cmds/exp/tac",
+    "@com_github_u-root_u-root//cmds/exp/tcz",
+    "@com_github_u-root_u-root//cmds/exp/validate",
+    "@com_github_u-root_u-root//cmds/exp/vboot",
+    "@com_github_u-root_u-root//cmds/exp/zimage",
+]
+
 go_busybox(
     name = "uroot_bb",
-    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds,
+    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds + uroot_linux_core_cmds_amd64only,
+    pure = "on",
+)
+
+go_busybox(
+    name = "uroot_bb_arm64",
+    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds,
+    goarch = "arm64",
+    goos = "linux",
+    pure = "on",
 )
