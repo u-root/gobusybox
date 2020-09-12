@@ -49,3 +49,11 @@ http_archive(
     strip_prefix = "buildtools-master",
     url = "https://github.com/bazelbuild/buildtools/archive/master.zip",
 )
+
+load("@bazel_gazelle//:deps.bzl", "go_repository")
+
+go_repository(
+    name = "com_github_u-root_u-root",
+    commit = "c75233be95f9638766866a428325b46968a7ff01",
+    importpath = "github.com/u-root/u-root",
+)
