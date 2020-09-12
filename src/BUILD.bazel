@@ -164,7 +164,16 @@ uroot_linux_core_cmds = [
     "@com_github_u-root_u-root//cmds/core/yes",
 ]
 
+uroot_linux_boot_cmds = [
+    "@com_github_u-root_u-root//cmds/boot/boot",
+    "@com_github_u-root_u-root//cmds/boot/fbnetboot",
+    "@com_github_u-root_u-root//cmds/boot/localboot",
+    "@com_github_u-root_u-root//cmds/boot/pxeboot",
+    "@com_github_u-root_u-root//cmds/boot/stboot",
+    "@com_github_u-root_u-root//cmds/boot/systemboot",
+]
+
 go_busybox(
     name = "uroot_bb",
-    cmds = uroot_linux_core_cmds,
+    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds,
 )
