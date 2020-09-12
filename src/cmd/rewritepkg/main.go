@@ -44,6 +44,8 @@ func main() {
 		log.Fatal("rewritepkg: no command name given")
 	} else if len(*destDir) == 0 {
 		log.Fatal("rewritepkg: no directory given")
+	} else if len(*bbImportPath) == 0 {
+		log.Fatlf("rewritepkg: no bb import path given")
 	}
 
 	c := build.Default
