@@ -17,28 +17,32 @@ go_busybox_binary(
     ],
 )
 
+test_cmds = [
+    "//bazeltest/cmd/dmesg",
+    "//bazeltest/cmd/helloworld",
+    "//bazeltest/cmd/implicitimport",
+    "//bazeltest/cmd/importsamename",
+    "//bazeltest/cmd/stdlibconflict",
+    "//cmd/embedvar",
+]
+
 go_busybox(
     name = "bb2",
-    cmds = [
-        "//bazeltest/cmd/dmesg",
-        "//bazeltest/cmd/helloworld",
-        "//bazeltest/cmd/implicitimport",
-        "//bazeltest/cmd/importsamename",
-        "//cmd/embedvar",
-    ],
+    cmds = test_cmds,
 )
 
 go_busybox(
     name = "bb2_arm64",
-    cmds = [
-        "//bazeltest/cmd/dmesg",
-        "//bazeltest/cmd/helloworld",
-        "//bazeltest/cmd/implicitimport",
-        "//bazeltest/cmd/importsamename",
-        "//bazeltest/cmd/stdlibconflict",
-        "//cmd/embedvar",
-    ],
+    cmds = test_cmds,
     goarch = "arm64",
+    goos = "linux",
+    pure = "on",
+)
+
+go_busybox(
+    name = "bb2_arm",
+    cmds = test_cmds,
+    goarch = "arm",
     goos = "linux",
     pure = "on",
 )
@@ -232,6 +236,14 @@ go_busybox(
     name = "uroot_bb_arm64",
     cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds,
     goarch = "arm64",
+    goos = "linux",
+    pure = "on",
+)
+
+go_busybox(
+    name = "uroot_bb_arm",
+    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds,
+    goarch = "arm",
     goos = "linux",
     pure = "on",
 )
