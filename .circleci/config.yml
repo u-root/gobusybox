@@ -241,6 +241,16 @@ jobs:
               git status --porcelain .
               exit 1
             fi
+      - run:
+          name: run buildifier
+          command: |
+            cd src && bazel run //:buildifier -- -r .
+            git status
+            if [[ -n "$(git status --porcelain .)" ]]; then
+              echo 'BUILD files are out-of-date: run `cd src && bazel run //:buildifier -- -r .` and then check in the changes'
+              git status --porcelain .
+              exit 1
+            fi
 
   build-bazel:
     <<: *bazel-template
