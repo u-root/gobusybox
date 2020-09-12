@@ -1,0 +1,15 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("//:gobb.bzl", "go_busybox_library")
+
+go_busybox_library(
+    name = "stdlibconflict_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/u-root/gobusybox/src/bazeltest/cmd/stdlibconflict",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "stdlibconflict",
+    embed = [":stdlibconflict_lib"],
+    visibility = ["//visibility:public"],
+)

@@ -35,6 +35,7 @@ go_busybox(
         "//bazeltest/cmd/helloworld",
         "//bazeltest/cmd/implicitimport",
         "//bazeltest/cmd/importsamename",
+        "//bazeltest/cmd/stdlibconflict",
         "//cmd/embedvar",
     ],
     goarch = "arm64",
