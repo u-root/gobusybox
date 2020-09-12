@@ -107,6 +107,12 @@ workflows:
       - build-bazel:
           requires:
             - clean-bazel
+      - build-bazel-cross:
+          requires:
+            - clean-bazel
+      - build-bazel-test:
+          requires:
+            - clean-bazel
 
 jobs:
   clean-makebb:
@@ -268,8 +274,26 @@ jobs:
           command: |
             cd src
             bazel build //...
+
+  build-bazel-cross:
+    <<: *bazel-template
+    steps:
+      - checkout
+      - run:
+          name: bazel cross-compile
+          command: |
+            cd src
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:uroot_bb
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:bb
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:uroot_bb
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:bb
+
+  build-bazel-test:
+    <<: *bazel-template
+    steps:
+      - checkout
+      - run:
+          name: bazel test
+          command: |
+            cd src
             bazel test //...
