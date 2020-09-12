@@ -9,5 +9,5 @@ import (
 )
 
 func main() {
-	log.Printf("MaxInt64: %d", math.MaxInt64)
+	log.Printf("MaxInt64: %d", math.MaxInt32)
 }
