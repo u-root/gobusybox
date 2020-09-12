@@ -1,4 +1,0 @@
-# We only want to rewrite binaries' go_library rules, so this directive is in
-# cmd/ rather than at the top-level.
-
-# gazelle:map_kind go_library go_busybox_library //:gobb.bzl
