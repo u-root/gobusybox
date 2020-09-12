@@ -103,13 +103,13 @@ func (a archives) findAndOpen(pkg string) io.ReadCloser {
 
 	suffixes := []string{
 		// bazel stdlib archives should be found using this method.
-		fmt.Sprintf("/%s.x", pkg),
-		fmt.Sprintf("/%s.a", pkg),
+		fmt.Sprintf("%s/%s.x", thatOneString(a.ctxt), pkg),
+		fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg),
 
 		// blaze finds non-stdlib dependency archives through this, and
 		// uses a zip for the stdlib files.
-		fmt.Sprintf("/%s.x", pkg),
-		fmt.Sprintf("/%s.a", pkg),
+		fmt.Sprintf("%s/%s.x", thatOneString(a.ctxt), pkg),
+		fmt.Sprintf("%s/%s.a", thatOneString(a.ctxt), pkg),
 	}
 
 	for _, s := range a.archs {
