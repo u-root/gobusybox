@@ -92,7 +92,7 @@ def _go_busybox_library(ctx):
         # This relies on f.basename being relative to output_dir, which
         # they should be since they're relative to gen.. It's a
         # bit of a hack.
-        outf = go.actions.declare_file("%s/gen/%s" % (f.dirname, f.basename))
+        outf = go.actions.declare_file("%s/gen2/%s" % (f.dirname, f.basename))
         outputs.append(outf)
         if not output_dir:
             output_dir = outf.dirname
