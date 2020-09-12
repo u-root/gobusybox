@@ -8,8 +8,16 @@ Go Busybox is a set of Go tools that allow you to compile many Go commands into
 one binary. The resulting binary uses its invocation arguments (`os.Args`) to
 determine which command is being called.
 
-Go Busybox works with Go 1.13+. It is well-tested with Linux on arm, arm64, and
-amd64. It supports Go modules, Go vendoring, and bazel.
+| Feature    | Support status                                        |
+| ---------- | ----------------------------------------------------- |
+| Go version | 1.13+                                                 |
+| Packaging  | Go modules, Go vendoring, bazel w/ [rules_go](https\://github.com/bazelbuild/rules_go) |
+| `GOOS`     | linux                                                 |
+| `GOARCH`   | amd64, arm, arm64                                     |
+| CGO        | *Not supported*                                       |
+
+Other `GOARCH` and `GOOS` architectures are likely to work as well, but are
+untested.
 
 An example:
 
@@ -55,7 +63,7 @@ makebb ./p9/cmd/* ./gokrazy/cmd/*
 
 Besides the makebb CLI command, there is a
 [Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb)
-and bazel rules in [src/gobb.bzl](src/gobb.bzl).
+and bazel rules in [src/gobb2.bzl](src/gobb2.bzl).
 
 ### Shortcomings
 
