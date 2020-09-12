@@ -262,11 +262,21 @@ jobs:
             cd src
             bazel build //:bb
             ./bazel-bin/bb_/bb helloworld
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:bb
-            bazel build //:bb_arm64
       - run:
-          name: build everything
+          name: build everything (amd64)
           command: cd src && bazel build //...
+      - run:
+          name: build arm64
+          command: |
+            cd src
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:uroot_bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:bb
+      - run:
+          name: build arm
+          command: |
+            cd src
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:uroot_bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:bb
       - run:
           name: test everything
           command: cd src && bazel test //...

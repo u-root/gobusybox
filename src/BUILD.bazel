@@ -215,9 +215,20 @@ uroot_linux_exp_cmds = [
     "@com_github_u-root_u-root//cmds/exp/zimage",
 ]
 
+# Defining this so we can also test
+# --platforms=@io_rules_bazel_go//go/toolchain:linux_(arm64|arm) kind of
+# cross-compilation.
 go_busybox(
     name = "uroot_bb",
+    cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds,
+    pure = "on",
+)
+
+go_busybox(
+    name = "uroot_bb_amd64",
     cmds = uroot_linux_core_cmds + uroot_linux_boot_cmds + uroot_linux_exp_cmds + uroot_linux_core_cmds_amd64only,
+    goarch = "amd64",
+    goos = "linux",
     pure = "on",
 )
 
