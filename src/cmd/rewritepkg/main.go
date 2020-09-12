@@ -26,14 +26,19 @@ var (
 	goos          = flag.String("goos", "", "override GOOS of the resulting busybox")
 	installSuffix = flag.String("install_suffix", "", "override installsuffix of the resulting busybox")
 	bbImportPath  = flag.String("bb_import_path", "", "BB import path")
-	gorootDir     uflag.Strings
-	archives      uflag.Strings
-	sourceFiles   uflag.Strings
+
+	sourceFiles      uflag.Strings
+	stdlibZip        uflag.Strings
+	unmappedArchives uflag.Strings
+	stdlibArchives   uflag.Strings
+	mappedArchives   uflag.Strings
 )
 
 func init() {
-	flag.Var(&gorootDir, "go_root_zip", "Go standard library zip archives containing stdlib object files")
-	flag.Var(&archives, "archive", "Archives")
+	flag.Var(&stdlibZip, "stdlib_zip", "(blaze) Go standard library zip archives containing stdlib object files")
+	flag.Var(&unmappedArchives, "unmapped_archive", "(blaze) Go .a archives file paths for every dependency, where file path == import path")
+	flag.Var(&stdlibArchives, "stdlib_archive", "(bazel) Go standard library directory or paths for .a files")
+	flag.Var(&mappedArchives, "mapped_archive", "(bazel) list of goImportPath:goArchiveFilePath for every dependency")
 	flag.Var(&sourceFiles, "source", "Source files")
 }
 
@@ -45,7 +50,27 @@ func main() {
 	} else if len(*destDir) == 0 {
 		log.Fatal("rewritepkg: no directory given")
 	} else if len(*bbImportPath) == 0 {
-		log.Fatlf("rewritepkg: no bb import path given")
+		log.Fatal("rewritepkg: no bb import path given")
+	}
+
+	// bazel must pass stdlibArchives + mappedArchives.
+	//
+	// blaze must pass stdlibZip + unmappedArchives.
+
+	if (len(stdlibZip) == 0 && len(stdlibArchives) == 0) || (len(stdlibZip) > 0 && len(stdlibArchives) > 0) {
+		log.Fatal("Must pass exactly one kind of stdlib option -- either --stdlib_zip or --stdlib_archive, " +
+			"but not neither nor both. More than one occurence of the chosen option is valid.")
+	}
+	if len(unmappedArchives) > 0 && len(mappedArchives) > 0 {
+		log.Fatal("Cannot pass both --mapped_archive and --unmapped_archive.")
+	}
+	// This is not a technical limitation -- this is just to make sure the
+	// Starlark rules pass the right stuff.
+	if len(unmappedArchives) > 0 && len(stdlibArchives) > 0 {
+		log.Fatal("Cannot combine --unmapped_archive with --stdlib_archive.")
+	}
+	if len(mappedArchives) > 0 && len(stdlibZip) > 0 {
+		log.Fatal("Cannot combin --mappedA_rchive with --stdlib_zip.")
 	}
 
 	c := build.Default
@@ -87,7 +112,11 @@ func main() {
 		}
 	}
 
-	imp, err := monoimporter.NewFromZips(c, []string(archives), []string(gorootDir))
+	imp, err := monoimporter.NewFromZips(c,
+		[]string(unmappedArchives),
+		[]string(mappedArchives),
+		[]string(stdlibArchives),
+		[]string(stdlibZip))
 	if err != nil {
 		log.Fatal(err)
 	}
