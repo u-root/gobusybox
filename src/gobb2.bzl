@@ -21,7 +21,12 @@ load(
 )
 
 GoDepInfo = provider("targets")
-CommandNamesInfo = provider("cmd_names")
+GoBusyboxLibrary = provider(
+    fields = ["command_name"],
+)
+GoBusyboxBinary = provider(
+    fields = ["command_names", "executable"],
+)
 
 def _go_dep_aspect(target, ctx):
     if ctx.rule.kind == "go_binary":
@@ -128,6 +133,9 @@ def _go_busybox_library(ctx):
         library,
         source,
         archive,
+        GoBusyboxLibrary(
+            command_name = ctx.attr.cmd[GoLibrary].name,
+        ),
     ]
 
 go_busybox_library = go_rule(
@@ -188,9 +196,12 @@ def _go_busybox_impl(ctx):
 
     args.add("--dest_dir", output_dir)
 
+    cmd_names = []
+
     # Stuff to import.
     for cmd in ctx.attr.cmds:
         args.add("--command", cmd[GoLibrary].importpath)
+        cmd_names.append(cmd[GoBusyboxLibrary].command_name)
 
     # Run the make_main binary.
     ctx.actions.run(
@@ -226,6 +237,10 @@ def _go_busybox_impl(ctx):
         DefaultInfo(
             files = depset([executable]),
             runfiles = runfiles,
+            executable = executable,
+        ),
+        GoBusyboxBinary(
+            command_names = cmd_names,
             executable = executable,
         ),
     ]
