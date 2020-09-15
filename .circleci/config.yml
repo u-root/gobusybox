@@ -248,6 +248,19 @@ jobs:
               exit 1
             fi
       - run:
+          name: sync bazel deps.bzl with src/go.mod
+          command: |
+            bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
+            git status
+            if [[ -n "$(git status --porcelain .)" ]]; then
+              echo 'go.mod deps are out of sync with deps.bzl: run '
+              echo '  bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies'
+              echo 'and then check in the changes'
+              git status --porcelain .
+              exit 1
+            fi
+
+      - run:
           name: run buildifier
           command: |
             bazel run :buildifier -- -r .

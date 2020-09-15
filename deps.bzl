@@ -82,8 +82,8 @@ def go_dependencies():
     go_repository(
         name = "com_github_google_goterm",
         importpath = "github.com/google/goterm",
-        sum = "h1:5CjVwnuUcp5adK4gmY6i72gpVFVnZDP2h5TmPScB6u4=",
-        version = "v0.0.0-20190703233501-fc88cf888a3f",
+        sum = "h1:CVuJwN34x4xM2aT4sIKhmeib40NeBPhRihNjQmpJsA4=",
+        version = "v0.0.0-20200907032337-555d40f16ae2",
     )
     go_repository(
         name = "com_github_prometheus_client_model",
@@ -142,8 +142,8 @@ def go_dependencies():
     go_repository(
         name = "org_golang_x_crypto",
         importpath = "golang.org/x/crypto",
-        sum = "h1:ikNHVSjEfnvz6sxdSPCaPt572qowuyMDMJLLm3Db3ig=",
-        version = "v0.0.0-20200728195943-123391ffb6de",
+        sum = "h1:psW17arqaxU48Z5kZ0CQnkZWQJsqcURM6tKiBApRjXI=",
+        version = "v0.0.0-20200622213623-75b288015ac9",
     )
     go_repository(
         name = "org_golang_x_exp",
