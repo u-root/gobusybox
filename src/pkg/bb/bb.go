@@ -39,6 +39,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
+	"github.com/u-root/gobusybox/src/pkg/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/u-root/pkg/cp"
 )
@@ -398,7 +399,7 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 	seenIDs := make(map[string]struct{})
 	for _, p := range localDepPkgs {
 		if _, ok := seenIDs[p.ID]; !ok {
-			if err := bbinternal.WritePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
+			if err := findpkg.WritePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
 				return false, fmt.Errorf("writing package %s failed: %v", p, err)
 			}
 			seenIDs[p.ID] = struct{}{}

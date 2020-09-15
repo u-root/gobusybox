@@ -10,30 +10,21 @@
 package bbinternal
 
 import (
-	"bytes"
-	"errors"
 	"fmt"
 	"go/ast"
-	"go/format"
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/ioutil"
-	"log"
-	"os"
 	"path"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 
-	"golang.org/x/sys/unix"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
-	"golang.org/x/tools/imports"
 
+	"github.com/u-root/gobusybox/src/pkg/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
-	"github.com/u-root/u-root/pkg/cp"
 )
 
 // ParseAST parses the given files for a package named name.
@@ -83,7 +74,7 @@ func CreateBBMainSource(fset *token.FileSet, files []*ast.File, pkgs []string, d
 	for _, pkg := range pkgs {
 		astutil.AddNamedImport(fset, files[0], "_", pkg)
 	}
-	return writeFiles(destDir, fset, files)
+	return findpkg.WriteFiles(destDir, fset, files)
 }
 
 // Package is a Go package.
@@ -123,216 +114,20 @@ type Package struct {
 	initAssigns map[ast.Expr]ast.Stmt
 }
 
-// modules returns a list of module directories => directories of packages
-// inside that module as well as packages that have no discernible module.
-//
-// The module for a package is determined by the **first** parent directory
-// that contains a go.mod.
-func modules(filesystemPaths []string) (map[string][]string, []string) {
-	// list of module directory => directories of packages it likely contains
-	moduledPackages := make(map[string][]string)
-	var noModulePkgs []string
-	for _, fullPath := range filesystemPaths {
-		components := strings.Split(fullPath, "/")
-
-		inModule := false
-		for i := len(components); i >= 1; i-- {
-			prefixPath := "/" + filepath.Join(components[:i]...)
-			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
-				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
-				inModule = true
-				break
-			}
-		}
-		if !inModule {
-			noModulePkgs = append(noModulePkgs, fullPath)
-		}
-	}
-	return moduledPackages, noModulePkgs
-}
-
-// We load file system paths differently, because there is a big difference between
-//
-//    go list -json ../../foobar
-//
-// and
-//
-//    (cd ../../foobar && go list -json .)
-//
-// Namely, PWD determines which go.mod to use. We want each
-// package to use its own go.mod, if it has one.
-func loadFSPackages(env golang.Environ, filesystemPaths []string) ([]*packages.Package, error) {
-	var absPaths []string
-	for _, fsPath := range filesystemPaths {
-		absPath, err := filepath.Abs(fsPath)
-		if err != nil {
-			return nil, fmt.Errorf("could not find package at %q", fsPath)
-		}
-		absPaths = append(absPaths, absPath)
-	}
-
-	var allps []*packages.Package
-
-	// Find each packages' module, and batch package queries together by module.
-	//
-	// Query all packages that don't have a module at all together, as well.
-	//
-	// Batching these queries saves a *lot* of time; on the order of
-	// several minutes for 30+ commands.
-	mods, noModulePkgDirs := modules(absPaths)
-
-	for moduleDir, pkgDirs := range mods {
-		pkgs, err := loadFSPkgs(env, moduleDir, pkgDirs...)
-		if err != nil {
-			return nil, fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
-		}
-		for _, pkg := range pkgs {
-			allps = addPkg(allps, pkg)
-		}
-	}
-
-	if len(noModulePkgDirs) > 0 {
-		// The directory we choose can be any dir that does not have a
-		// go.mod anywhere in its parent tree.
-		vendoredPkgs, err := loadFSPkgs(env, noModulePkgDirs[0], noModulePkgDirs...)
-		if err != nil {
-			return nil, fmt.Errorf("could not find packages: %v", err)
-		}
-		for _, p := range vendoredPkgs {
-			allps = addPkg(allps, p)
-		}
-	}
-	return allps, nil
-}
-
-func addPkg(plist []*packages.Package, p *packages.Package) []*packages.Package {
-	if len(p.Errors) > 0 {
-		// TODO(chrisko): should we return an error here instead of warn?
-		log.Printf("Skipping package %v for errors:", p)
-		packages.PrintErrors([]*packages.Package{p})
-	} else if len(p.GoFiles) == 0 {
-		log.Printf("Skipping package %v because it has no Go files", p)
-	} else if p.Name != "main" {
-		log.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
-	} else {
-		plist = append(plist, p)
-	}
-	return plist
-}
-
 // NewPackages collects package metadata about all named packages.
 //
 // names can either be directory paths or Go import paths.
 func NewPackages(env golang.Environ, names ...string) ([]*Package, error) {
-	var goImportPaths []string
-	var filesystemPaths []string
-
-	for _, name := range names {
-		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") {
-			filesystemPaths = append(filesystemPaths, name)
-		} else if _, err := os.Stat(name); err == nil {
-			filesystemPaths = append(filesystemPaths, name)
-		} else {
-			goImportPaths = append(goImportPaths, name)
-		}
-	}
-
-	var ps []*packages.Package
-	if len(goImportPaths) > 0 {
-		importPkgs, err := loadPkgs(env, "", goImportPaths...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
-		}
-		for _, p := range importPkgs {
-			ps = addPkg(ps, p)
-		}
-	}
-
-	pkgs, err := loadFSPackages(env, filesystemPaths)
+	ps, err := findpkg.NewPackages(env, names...)
 	if err != nil {
-		return nil, fmt.Errorf("could not load packages from file system: %v", err)
+		return nil, err
 	}
-	ps = append(ps, pkgs...)
 
 	var ips []*Package
 	for _, p := range ps {
 		ips = append(ips, NewPackage(path.Base(p.PkgPath), p))
 	}
 	return ips, nil
-}
-
-// loadFSPkgs looks up importDirs packages, making the import path relative to
-// `dir`. `go list -json` requires the import path to be relative to the dir
-// when the package is outside of a $GOPATH and there is no go.mod in any parent directory.
-func loadFSPkgs(env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
-	// Eligibility check: does each directory contain files that are
-	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
-	// tags?
-	//
-	// In Go 1.14 and Go 1.15, this is done by packages.Load on a
-	// per-package basis, which is why batching queries works out well. In
-	// Go 1.13, the entire query fails with no indication of which package
-	// made it fail, so we need to filter out commands that do not have
-	// compilable files first.
-	var compilableImportDirs []string
-	for _, importDir := range importDirs {
-		f, err := os.Open(importDir)
-		if err != nil {
-			return nil, err
-		}
-		names, err := f.Readdirnames(0)
-		if errors.Is(err, unix.ENOTDIR) {
-			return nil, fmt.Errorf("Go busybox requires a list of directories; failed to read directory %s: %v", importDir, err)
-		} else if err != nil {
-			return nil, fmt.Errorf("could not determine file names for %s: %v", importDir, err)
-		}
-		foundOne := false
-		for _, name := range names {
-			if match, err := env.Context.MatchFile(importDir, name); err != nil {
-				// This pretty much only returns an error if
-				// the file cannot be opened or read.
-				return nil, fmt.Errorf("could not determine Go build constraints of %s: %v", importDir, err)
-			} else if match {
-				foundOne = true
-				break
-			}
-		}
-		if foundOne {
-			compilableImportDirs = append(compilableImportDirs, importDir)
-		} else {
-			log.Printf("Skipping directory %s because build constraints exclude all Go files", importDir)
-		}
-	}
-
-	if len(compilableImportDirs) == 0 {
-		return nil, fmt.Errorf("build constraints excluded all requested commands")
-	}
-
-	// Make all paths relative, because packages.Load/`go list -json` does
-	// not like absolute paths sometimes.
-	var relImportDirs []string
-	for _, importDir := range compilableImportDirs {
-		relImportDir, err := filepath.Rel(dir, importDir)
-		if err != nil {
-			return nil, fmt.Errorf("Go package path %s is not relative to %s: %v", importDir, dir, err)
-		}
-
-		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
-		//
-		// The former looks for cmd/foo in $GOROOT or $GOPATH, while
-		// the latter looks in the relative directory ./cmd/foo.
-		relImportDirs = append(relImportDirs, "./"+relImportDir)
-	}
-	return loadPkgs(env, dir, relImportDirs...)
-}
-
-func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedImports | packages.NeedFiles | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedCompiledGoFiles | packages.NeedModule,
-		Env:  append(os.Environ(), env.Env()...),
-		Dir:  dir,
-	}
-	return packages.Load(cfg, patterns...)
 }
 
 // NewPackage creates a new Package based on an existing packages.Package.
@@ -606,34 +401,6 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	return hasMain
 }
 
-// WritePkg writes p's files into destDir.
-func WritePkg(p *packages.Package, destDir string) error {
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-
-	for _, fp := range p.OtherFiles {
-		if err := cp.Copy(fp, filepath.Join(destDir, filepath.Base(fp))); err != nil {
-			return fmt.Errorf("copy failed: %v", err)
-		}
-	}
-
-	return writeFiles(destDir, p.Fset, p.Syntax)
-}
-
-func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
-	// Write all files out.
-	for _, file := range files {
-		name := fset.File(file.Package).Name()
-
-		path := filepath.Join(destDir, filepath.Base(name))
-		if err := writeFile(path, fset, file); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 // Rewrite rewrites p into destDir as a bb package, rewriting its init and main
 // functions.
 //
@@ -704,33 +471,5 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 
 	mainFile.Decls = append(mainFile.Decls, varInit, p.init, bbRegisterSelf)
 
-	return WritePkg(p.Pkg, destDir)
-}
-
-func writeFile(path string, fset *token.FileSet, f *ast.File) error {
-	var buf bytes.Buffer
-	if err := format.Node(&buf, fset, f); err != nil {
-		return fmt.Errorf("error formatting Go file %q: %v", path, err)
-	}
-	return writeGoFile(path, buf.Bytes())
-}
-
-func writeGoFile(path string, code []byte) error {
-	// Format the file. Do not fix up imports, as we only moved code around
-	// within files.
-	opts := imports.Options{
-		Comments:   true,
-		TabIndent:  true,
-		TabWidth:   8,
-		FormatOnly: true,
-	}
-	code, err := imports.Process("commandline", code, &opts)
-	if err != nil {
-		return fmt.Errorf("bad parse while processing imports %q: %v", path, err)
-	}
-
-	if err := ioutil.WriteFile(path, code, 0644); err != nil {
-		return fmt.Errorf("error writing Go file to %q: %v", path, err)
-	}
-	return nil
+	return findpkg.WritePkg(p.Pkg, destDir)
 }

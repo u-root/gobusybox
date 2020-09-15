@@ -12,6 +12,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//pkg/bb/bbinternal",
+        "//pkg/findpkg",
         "//pkg/golang",
         "@com_github_google_goterm//term",
         "@com_github_u_root_u_root//pkg/cp",
