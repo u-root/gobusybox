@@ -141,20 +141,6 @@ exclude github.com/mdlayher/ethernet v1.0.3
 Certain conflicts can come up during this prcess. This section covers each
 potential conflict and potential solutions you can enact in your code:
 
-1.  Conflicting major version number dependencies. Ex:
-
-    ```
-    > u-root/go.mod
-    require github.com/insomniacslk/dhcp/v1 v1.0.0-...
-
-    > u-bmc/go.mod
-    require github.com/insomniacslk/dhcp/v2 v2.0.0-...
-    ```
-
-    **Solution**: advance u-root's version or roll u-bmc's version back. See
-    [Minimal Version Selection](https://golang.org/ref/mod#minimal-version-selection)
-    for details on what Go expects.
-
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
     are being combined into a busybox with `makebb ./u-root/cmds/core/*
     ./u-bmc/cmd/*`. If `u-bmc/go.mod` depends on u-root@v3 from GitHub, that
