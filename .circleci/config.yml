@@ -31,7 +31,6 @@ templates:
     working_directory: /go/bazel_gobusybox
     environment:
       - GOPATH: "/go"
-    resource_class: xlarge
 
   build-gomod-template: &build-gomod-template
     steps:
