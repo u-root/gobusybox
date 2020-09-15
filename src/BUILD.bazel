@@ -1,18 +1,13 @@
-load("//:gobb2.bzl", "go_busybox")
-load("@bazel_gazelle//:def.bzl", "gazelle")
-load("//:static_test.bzl", "static_test")
-load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
-
-# gazelle:prefix github.com/u-root/gobusybox/src
-# gazelle:go_naming_convention import
+load("//src:gobb2.bzl", "go_busybox")
+load("//src:static_test.bzl", "static_test")
 
 test_cmds = [
-    "//bazeltest/cmd/dmesg",
-    "//bazeltest/cmd/helloworld",
-    "//bazeltest/cmd/implicitimport",
-    "//bazeltest/cmd/importsamename",
-    "//bazeltest/cmd/stdlibconflict",
-    "//cmd/embedvar",
+    "//src/bazeltest/cmd/dmesg",
+    "//src/bazeltest/cmd/helloworld",
+    "//src/bazeltest/cmd/implicitimport",
+    "//src/bazeltest/cmd/importsamename",
+    "//src/bazeltest/cmd/stdlibconflict",
+    "//src/cmd/embedvar",
 ]
 
 go_busybox(
@@ -50,14 +45,6 @@ sh_library(
     name = "static_test",
     srcs = [":static_test.sh"],
     visibility = ["//visibility:public"],
-)
-
-gazelle(
-    name = "gazelle",
-)
-
-buildifier(
-    name = "buildifier",
 )
 
 # uroot_linux_core_cmds is all commands in //cmds/core/... except for bind and

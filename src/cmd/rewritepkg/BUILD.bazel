@@ -6,9 +6,9 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/cmd/rewritepkg",
     visibility = ["//visibility:private"],
     deps = [
-        "//pkg/bb/bbinternal",
-        "//pkg/monoimporter",
-        "//pkg/uflag",
+        "//src/pkg/bb/bbinternal",
+        "//src/pkg/monoimporter",
+        "//src/pkg/uflag",
     ],
 )
 

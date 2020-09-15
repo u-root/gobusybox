@@ -154,10 +154,10 @@ go_busybox_library = go_rule(
             executable = True,
             cfg = "host",
             allow_files = True,
-            default = Label("//cmd/rewritepkg"),
+            default = Label("//src/cmd/rewritepkg"),
         ),
         "_new_deps": attr.label_list(
-            default = ["//pkg/bb/bbmain"],
+            default = ["//src/pkg/bb/bbmain"],
         ),
         "_go_context_data": attr.label(
             default = "@io_bazel_rules_go//:go_context_data",
@@ -255,13 +255,13 @@ _go_busybox = go_transition_rule(
             providers = [GoArchive, GoDepInfo],
             allow_rules = ["go_binary"],
             aspects = [go_dep_aspect],
-            default = Label("//pkg/bb/bbmain/cmd"),
+            default = Label("//src/pkg/bb/bbmain/cmd"),
         ),
         "_make_main": attr.label(
             executable = True,
             cfg = "host",
             allow_files = True,
-            default = Label("//cmd/makebbmain"),
+            default = Label("//src/cmd/makebbmain"),
         ),
         "_go_context_data": attr.label(
             default = "@io_bazel_rules_go//:go_context_data",

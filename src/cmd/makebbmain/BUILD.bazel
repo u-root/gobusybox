@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/cmd/makebbmain",
     visibility = ["//visibility:private"],
     deps = [
-        "//pkg/bb/bbinternal",
-        "//pkg/uflag",
+        "//src/pkg/bb/bbinternal",
+        "//src/pkg/uflag",
     ],
 )
 

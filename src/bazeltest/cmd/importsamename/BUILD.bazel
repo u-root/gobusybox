@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/bazeltest/cmd/importsamename",
     visibility = ["//visibility:private"],
     deps = [
-        "//bazeltest/pkg/log",
-        "//bazeltest/pkg/log/log",
+        "//src/bazeltest/pkg/log",
+        "//src/bazeltest/pkg/log/log",
     ],
 )
 

@@ -241,20 +241,20 @@ jobs:
       - run:
           name: run gazelle
           command: |
-            cd src && bazel run //:gazelle
+            bazel run :gazelle
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `cd src && bazel run //:gazelle` and then check in the changes'
+              echo 'BUILD files are out-of-date: run `bazel run :gazelle` and then check in the changes'
               git status --porcelain .
               exit 1
             fi
       - run:
           name: run buildifier
           command: |
-            cd src && bazel run //:buildifier -- -r .
+            bazel run :buildifier -- -r .
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `cd src && bazel run //:buildifier -- -r .` and then check in the changes'
+              echo 'BUILD files are out-of-date: run `bazel run :buildifier -- -r .` and then check in the changes'
               git status --porcelain .
               exit 1
             fi
@@ -266,14 +266,11 @@ jobs:
       - run:
           name: build busybox
           command: |
-            cd src
-            bazel build //:bb
-            ./bazel-bin/bb_/bb helloworld
+            bazel build //src:bb
+            ./bazel-bin/src/bb_/bb helloworld
       - run:
           name: build everything (amd64)
-          command: |
-            cd src
-            bazel build //...
+          command: bazel build //src/...
 
   build-bazel-cross:
     <<: *bazel-template
@@ -282,11 +279,10 @@ jobs:
       - run:
           name: bazel cross-compile
           command: |
-            cd src
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //:bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //:bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:uroot_bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
 
   build-bazel-test:
     <<: *bazel-template
@@ -294,6 +290,4 @@ jobs:
       - checkout
       - run:
           name: bazel test
-          command: |
-            cd src
-            bazel test //...
+          command: bazel test //src/...

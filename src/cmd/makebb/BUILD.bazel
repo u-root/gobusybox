@@ -6,8 +6,8 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/cmd/makebb",
     visibility = ["//visibility:private"],
     deps = [
-        "//pkg/bb",
-        "//pkg/golang",
+        "//src/pkg/bb",
+        "//src/pkg/golang",
     ],
 )
 
