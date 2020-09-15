@@ -1,12 +1,4 @@
 /bb
 /makebb
-bazel-bin
-bazel-src
-bazel-out
-bazel-testlogs
 /bb2
-/makebb
-bazel-bin
-bazel-out
-bazel-src
-bazel-testlogs
+bazel-*

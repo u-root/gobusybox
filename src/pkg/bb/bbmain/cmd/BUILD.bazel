@@ -7,7 +7,7 @@ go_library(
     srcs = ["main.go"],
     importpath = "github.com/u-root/gobusybox/src/pkg/bb/bbmain/cmd",
     visibility = ["//visibility:private"],
-    deps = ["//pkg/bb/bbmain"],
+    deps = ["//src/pkg/bb/bbmain"],
 )
 
 go_binary(

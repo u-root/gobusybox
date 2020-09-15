@@ -6,7 +6,7 @@ go_library(
     importpath = "github.com/u-root/gobusybox/src/pkg/bb/bbinternal",
     visibility = ["//visibility:public"],
     deps = [
-        "//pkg/golang",
+        "//src/pkg/golang",
         "@com_github_u_root_u_root//pkg/cp",
         "@org_golang_x_sys//unix",
         "@org_golang_x_tools//go/ast/astutil",
