@@ -32,7 +32,7 @@ trap ctrl_c INT
 (cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
 
 # Make u-root have modules.
-(cd $TMPDIR/u-root && $GO mod init github.com/u-root/u-root && rm -rf vendor)
+(cd $TMPDIR/u-root && rm -rf vendor)
 
 # Make u-bmc have modules, and use local u-root.
 (cd $TMPDIR/u-bmc && $GO mod init github.com/u-root/u-bmc)
