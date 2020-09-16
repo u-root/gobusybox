@@ -88,6 +88,11 @@ type Opts struct {
 	// GoBuildOpts is configuration for the `go build` command that
 	// compiles the busybox binary.
 	GoBuildOpts *golang.BuildOpts
+
+	// AllowMixedMode allows mixed mode (module / non-module) compilation.
+	//
+	// If this is done with GO111MODULE=on,
+	AllowMixedMode bool
 }
 
 // BuildBusybox builds a busybox of many Go commands. opts contains both the
@@ -166,7 +171,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 			numNoModule++
 		}
 	}
-	if len(modules) > 0 && numNoModule > 0 {
+	if !opts.AllowMixedMode && len(modules) > 0 && numNoModule > 0 {
 		return fmt.Errorf("busybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(listStrings(modules), ", "))
 	}
 
@@ -183,23 +188,66 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	}
 
 	// Collect and write dependencies into pkgDir.
-	hasModules, err := dealWithDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds)
-	if err != nil {
-		return fmt.Errorf("dealing with deps: %v", err)
+	if err := dealWithDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
+		return fmt.Errorf("collecting and putting dependencies in place failed: %v", err)
 	}
 
 	if err := writeBBMain(bbDir, tmpDir, bbImports); err != nil {
-		return err
+		return fmt.Errorf("failed to write main.go: %v", err)
 	}
 
 	// Compile bb.
-	if opts.Env.GO111MODULE == "off" || !hasModules {
+	if opts.Env.GO111MODULE == "off" || numNoModule > 0 {
 		opts.Env.GOPATH = tmpDir
 	}
 	if err := opts.Env.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
-		return fmt.Errorf("go build: %v", err)
+		if opts.Env.GO111MODULE == "off" || numNoModule > 0 {
+			return &ErrGopathBuild{
+				CmdDir: bbDir,
+				GOPATH: tmpDir,
+				Err:    err,
+			}
+		} else {
+			return &ErrModuleBuild{
+				CmdDir: bbDir,
+				Err:    err,
+			}
+		}
 	}
 	return nil
+}
+
+// ErrModuleBuild is returned for a go build failure when modules were enabled.
+type ErrModuleBuild struct {
+	CmdDir string
+	Err    error
+}
+
+// Unwrap implements error.Unwrap.
+func (e *ErrModuleBuild) Unwrap() error {
+	return e.Err
+}
+
+// Error implements error.Error.
+func (e *ErrModuleBuild) Error() string {
+	return fmt.Sprintf("go build with modules failed: %v", e.Err)
+}
+
+// ErrGopathBuild is returned for a go build failure when modules were disabled.
+type ErrGopathBuild struct {
+	CmdDir string
+	GOPATH string
+	Err    error
+}
+
+// Unwrap implements error.Unwrap.
+func (e *ErrGopathBuild) Unwrap() error {
+	return e.Err
+}
+
+// Error implements error.Error.
+func (e *ErrGopathBuild) Error() string {
+	return fmt.Sprintf("non-module go build failed: %v", e.Err)
 }
 
 // writeBBMain writes $TMPDIR/src/bb.u-root.com/bb/pkg/bbmain/register.go and
@@ -365,7 +413,7 @@ func moduleIdentifier(m *packages.Module) string {
 // dealWithDeps tries to suss out local files that need to be in the tree.
 //
 // It helps to have read https://golang.org/ref/mod when editing this function.
-func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) (bool, error) {
+func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
 	// Module-enabled Go programs resolve their dependencies in one of two ways:
 	//
 	// - locally, if the dependency is *in* the module or there is a local replace directive
@@ -385,7 +433,7 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 	// the tree.
 	localModules, err := localModules(pkgDir, mainPkgs)
 	if err != nil {
-		return false, err
+		return err
 	}
 
 	var localDepPkgs []*packages.Package
@@ -415,7 +463,7 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 	for _, p := range localDepPkgs {
 		if _, ok := seenIDs[p.ID]; !ok {
 			if err := bbinternal.WritePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
-				return false, fmt.Errorf("writing package %s failed: %v", p, err)
+				return fmt.Errorf("writing package %s failed: %v", p, err)
 			}
 			seenIDs[p.ID] = struct{}{}
 		}
@@ -442,11 +490,11 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 		//
 		// Warn the user if they are potentially incompatible.
 		if err := ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), []byte(content), 0755); err != nil {
-			return false, err
+			return err
 		}
-		return true, nil
+		return nil
 	}
-	return false, nil
+	return nil
 }
 
 // deps recursively iterates through imports and returns the set of packages
