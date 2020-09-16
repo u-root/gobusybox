@@ -41,6 +41,14 @@ import (
 	"github.com/u-root/u-root/pkg/cp"
 )
 
+func listStrings(m map[string]struct{}) []string {
+	var l []string
+	for k := range m {
+		l = append(l, k)
+	}
+	return l
+}
+
 func checkDuplicate(cmds []string) error {
 	seen := make(map[string]struct{})
 	for _, cmd := range cmds {
@@ -148,6 +156,18 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	}
 	if len(cmds) == 0 {
 		return fmt.Errorf("no valid commands given")
+	}
+	modules := make(map[string]struct{})
+	var numNoModule int
+	for _, cmd := range cmds {
+		if cmd.Pkg.Module != nil {
+			modules[cmd.Pkg.Module.Path] = struct{}{}
+		} else {
+			numNoModule++
+		}
+	}
+	if len(modules) > 0 && numNoModule > 0 {
+		return fmt.Errorf("busybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(listStrings(modules), ", "))
 	}
 
 	// List of packages to import in the real main file.
