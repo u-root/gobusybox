@@ -6,18 +6,39 @@
 package golang
 
 import (
+	"flag"
 	"fmt"
 	"go/build"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/u-root/gobusybox/src/pkg/uflag"
 )
 
+// Environ are the environment variables for the Go compiler.
 type Environ struct {
 	build.Context
 
 	GO111MODULE string
+}
+
+// Valid returns an error if GOARCH, GOROOT, or GOOS are unset.
+func (c Environ) Valid() error {
+	if c.GOARCH == "" && c.GOROOT == "" && c.GOOS == "" {
+		return fmt.Errorf("golang.Environ should use golang.Default(), not empty value")
+	}
+	if c.GOARCH == "" {
+		return fmt.Errorf("empty GOARCH")
+	}
+	if c.GOROOT == "" {
+		return fmt.Errorf("empty GOROOT")
+	}
+	if c.GOOS == "" {
+		return fmt.Errorf("empty GOOS")
+	}
+	return nil
 }
 
 // Default is the default build environment comprised of the default GOPATH,
@@ -100,40 +121,68 @@ func (c Environ) String() string {
 	return strings.Join(c.EnvHuman(), " ")
 }
 
-// Optional arguments to Environ.Build.
+// Optional arguments to Environ.BuildDir.
 type BuildOpts struct {
 	// NoStrip builds an unstripped binary.
+	//
+	// Symbols and Build ID will be left in the binary.
+	//
+	// If NoTrimPath and NoStrip are false, the binary produced will be
+	// reproducible.
 	NoStrip bool
+
+	// EnableInlining enables function inlining.
+	EnableInlining bool
+
+	// NoTrimPath produces a binary whose stack traces contain the module
+	// root dirs, GOPATHs, and GOROOTs.
+	//
+	// If NoTrimPath and NoStrip are false, the binary produced will be
+	// reproducible.
+	NoTrimPath bool
+
 	// ExtraArgs to `go build`.
 	ExtraArgs []string
 }
 
+// RegisterFlags registers flags for BuildOpts.
+func (b *BuildOpts) RegisterFlags(f *flag.FlagSet) {
+	f.BoolVar(&b.NoStrip, "go-no-strip", false, "Do not strip symbols & Build ID from the binary (will not produce a reproducible binary)")
+	f.BoolVar(&b.EnableInlining, "go-enable-inlining", false, "Enable inlining (will likely produce a larger binary)")
+	f.BoolVar(&b.NoTrimPath, "go-no-trimpath", false, "Disable -trimpath (will not produce a reproducible binary)")
+	arg := uflag.Strings(b.ExtraArgs)
+	f.Var(&arg, "go-extra-args", "Extra args to `go build`")
+}
+
 // BuildDir compiles the package in the directory `dirPath`, writing the build
 // object to `binaryPath`.
-func (c Environ) BuildDir(dirPath string, binaryPath string, opts BuildOpts) error {
+func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) error {
 	args := []string{
 		"build",
 
 		// Force rebuilding of packages.
 		"-a",
 
-		// Strip all symbols, and don't embed a Go build ID to be reproducible.
-		"-ldflags", "-s -w -buildid=",
-
 		"-o", binaryPath,
-		"-installsuffix", "uroot",
-
-		"-gcflags=all=-l", // Disable "function inlining" to get a smaller binary
+	}
+	if c.InstallSuffix != "" {
+		args = append(args, "-installsuffix", c.Context.InstallSuffix)
+	}
+	if !opts.EnableInlining {
+		// Disable "function inlining" to get a (likely) smaller binary.
+		args = append(args, "-gcflags=all=-l")
 	}
 	if !opts.NoStrip {
-		args = append(args, `-ldflags=-s -w`) // Strip all symbols.
+		// Strip all symbols, and don't embed a Go build ID to be reproducible.
+		args = append(args, "-ldflags", "-s -w -buildid=")
 	}
-
-	// Reproducible builds: Trim any GOPATHs out of the executable's
-	// debugging information.
-	//
-	// E.g. Trim /tmp/bb-*/ from /tmp/bb-12345567/src/github.com/...
-	args = append(args, "-trimpath")
+	if !opts.NoTrimPath {
+		// Reproducible builds: Trim any GOPATHs out of the executable's
+		// debugging information.
+		//
+		// E.g. Trim /tmp/bb-*/ from /tmp/bb-12345567/src/github.com/...
+		args = append(args, "-trimpath")
+	}
 
 	if len(c.BuildTags) > 0 {
 		args = append(args, []string{"-tags", strings.Join(c.BuildTags, " ")}...)
