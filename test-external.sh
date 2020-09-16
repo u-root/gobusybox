@@ -69,4 +69,4 @@ trap ctrl_c INT
 (cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 github.com/u-root/u-root/cmds/...
 
-rm -rf $GOPATH_TMPDIR
+rm -rf $GOPATH_TMPDIR bb3
