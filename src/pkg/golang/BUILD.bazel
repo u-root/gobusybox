@@ -5,4 +5,5 @@ go_library(
     srcs = ["build.go"],
     importpath = "github.com/u-root/gobusybox/src/pkg/golang",
     visibility = ["//visibility:public"],
+    deps = ["//src/pkg/uflag"],
 )

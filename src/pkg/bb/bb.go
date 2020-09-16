@@ -25,13 +25,11 @@ package bb
 
 import (
 	"fmt"
-	"go/ast"
 	"io/ioutil"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
-	"strconv"
 	"strings"
 
 	"github.com/google/goterm/term"
@@ -55,87 +53,85 @@ func checkDuplicate(cmds []string) error {
 	return nil
 }
 
-// importPath returns the unquoted import path of s,
-// or "" if the path is not properly quoted.
-func importPath(s *ast.ImportSpec) string {
-	t, err := strconv.Unquote(s.Path.Value)
-	if err != nil {
-		return ""
-	}
-	return t
+// Opts are the arguments to BuildBusybox.
+type Opts struct {
+	// Env are the environment variables used in Go compilation and package
+	// discovery.
+	Env golang.Environ
+
+	// GenSrcDir is an empty directory to generate the busybox source code
+	// in.
+	//
+	// If GenSrcDir has children, BuildBusybox will return an error. If
+	// GenSrcDir does not exist, it will be created. If no GenSrcDir is
+	// given, a temporary directory will be generated. The generated
+	// directory will be deleted if compilation succeeds.
+	//
+	// In GOPATH mode, GOPATH=GenSrcDir for compilation.
+	GenSrcDir string
+
+	// CommandPaths is a list of file system directories containing Go
+	// commands, or Go import paths.
+	CommandPaths []string
+
+	// BinaryPath is the file to write the binary to.
+	BinaryPath string
+
+	// GoBuildOpts is configuration for the `go build` command that
+	// compiles the busybox binary.
+	GoBuildOpts *golang.BuildOpts
 }
 
-// BuildBusybox builds a busybox of the given Go commands.
+// BuildBusybox builds a busybox of many Go commands. opts contains both the
+// commands to build and other options.
 //
-// cmdPaths is a list of Go import paths or file system directories containing
-// Go commands. binaryPath is the output binary path. noStrip determines
-// whether to strip all symbols from the busybox binary to save more space.
-//
-// env is the Go environment (GOOS, GOARCH, etc).
-func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPath string) (nerr error) {
-	tmpDir, err := ioutil.TempDir("", "bb-")
-	if err != nil {
+// For documentation on how this works, please refer to the README at the top
+// of the repository.
+func BuildBusybox(opts *Opts) (nerr error) {
+	if opts == nil {
+		return fmt.Errorf("no options given for busybox build")
+	} else if err := opts.Env.Valid(); err != nil {
 		return err
 	}
-	defer func() {
-		if nerr != nil {
-			log.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
-		} else {
-			os.RemoveAll(tmpDir)
-		}
-	}()
 
-	// INB4: yes, this *is* too clever. It's because Go modules are too
-	// clever. Sorry.
-	//
-	// Inevitably, we will build commands across multiple modules, e.g.
-	// u-root and u-bmc each have their own go.mod, but will get built into
-	// one busybox executable.
-	//
-	// Each u-bmc and u-root command need their respective go.mod
-	// dependencies, so we'll preserve their module file.
-	//
-	// However, we *also* need to still allow building with GOPATH and
-	// vendoring. The structure we build *has* to also resemble a
-	// GOPATH-based build.
-	//
-	// The easiest thing to do is to make the directory structure
-	// GOPATH-compatible, and use go.mods to replace modules with the local
-	// directories.
-	//
-	// So pretend GOPATH=tmp.
-	//
-	// Structure we'll build:
-	//
-	//   tmp/src/bb.u-root.com/bb
-	//   tmp/src/bb.u-root.com/bb/main.go
-	//      import "<module1>/cmd/foo"
-	//      import "<module2>/cmd/bar"
-	//
-	//      func main()
-	//
-	// The only way to refer to other Go modules locally is to replace them
-	// with local paths in a top-level go.mod:
-	//
-	//   tmp/src/bb.u-root.com/bb/go.mod
-	//      package bb.u-root.com
-	//
-	//	replace <module1> => ../../<module1>
-	//	replace <module2> => ../../<module2>
-	//
-	// Because GOPATH=tmp, the source should be in $GOPATH/src, just to
-	// accommodate both build systems.
-	//
-	//   tmp/src/<module1>
-	//   tmp/src/<module1>/go.mod
-	//   tmp/src/<module1>/cmd/foo/main.go
-	//
-	//   tmp/src/<module2>
-	//   tmp/src/<module2>/go.mod
-	//   tmp/src/<module2>/cmd/bar/main.go
+	var tmpDir string
+	if opts.GenSrcDir != "" {
+		var relTmpDir string
+		dirents, err := ioutil.ReadDir(opts.GenSrcDir)
+		if os.IsNotExist(err) {
+			if err := os.MkdirAll(opts.GenSrcDir, 0700); err != nil {
+				return fmt.Errorf("could not create busybox generated source directory: %w", err)
+			}
+			relTmpDir = opts.GenSrcDir
+		} else if err != nil {
+			return fmt.Errorf("could not read busybox generated source directory: %w", err)
+		} else if len(dirents) > 0 {
+			return fmt.Errorf("busybox generated source directory is not an empty directory")
+		} else {
+			relTmpDir = opts.GenSrcDir
+		}
+		absDir, err := filepath.Abs(relTmpDir)
+		if err != nil {
+			return fmt.Errorf("busybox gen src dir %s could not be made absolute: %v", relTmpDir, err)
+		}
+		tmpDir = absDir
+	} else {
+		var err error
+		tmpDir, err = ioutil.TempDir("", "bb-")
+		if err != nil {
+			return err
+		}
+		defer func() {
+			if nerr != nil {
+				log.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
+			} else {
+				os.RemoveAll(tmpDir)
+			}
+		}()
+	}
 
 	bbDir := filepath.Join(tmpDir, "src/bb.u-root.com/bb")
-	if err := os.MkdirAll(bbDir, 0755); err != nil {
+	if err := os.MkdirAll(bbDir, 0700); err != nil {
 		return err
 	}
 	pkgDir := filepath.Join(tmpDir, "src")
@@ -146,12 +142,12 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}*/
 
 	// Ask go about all the commands in one batch for dependency caching.
-	cmds, err := bbinternal.NewPackages(env, cmdPaths...)
+	cmds, err := bbinternal.NewPackages(opts.Env, opts.CommandPaths...)
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
 	if len(cmds) == 0 {
-		return fmt.Errorf("no commands compiled")
+		return fmt.Errorf("no valid commands given")
 	}
 
 	// List of packages to import in the real main file.
@@ -167,7 +163,7 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 
 	// Collect and write dependencies into pkgDir.
-	hasModules, err := dealWithDeps(env, bbDir, tmpDir, pkgDir, cmds)
+	hasModules, err := dealWithDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds)
 	if err != nil {
 		return fmt.Errorf("dealing with deps: %v", err)
 	}
@@ -177,10 +173,10 @@ func BuildBusybox(env golang.Environ, cmdPaths []string, noStrip bool, binaryPat
 	}
 
 	// Compile bb.
-	if env.GO111MODULE == "off" || !hasModules {
-		env.GOPATH = tmpDir
+	if opts.Env.GO111MODULE == "off" || !hasModules {
+		opts.Env.GOPATH = tmpDir
 	}
-	if err := env.BuildDir(bbDir, binaryPath, golang.BuildOpts{NoStrip: noStrip}); err != nil {
+	if err := opts.Env.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
 		return fmt.Errorf("go build: %v", err)
 	}
 	return nil
