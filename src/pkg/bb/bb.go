@@ -28,7 +28,6 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -49,14 +48,13 @@ func listStrings(m map[string]struct{}) []string {
 	return l
 }
 
-func checkDuplicate(cmds []string) error {
+func checkDuplicate(cmds []*bbinternal.Package) error {
 	seen := make(map[string]struct{})
 	for _, cmd := range cmds {
-		name := path.Base(cmd)
-		if _, ok := seen[name]; ok {
-			return fmt.Errorf("failed to build with bb: found duplicate command %s", name)
+		if _, ok := seen[cmd.Name]; ok {
+			return fmt.Errorf("failed to build with bb: found duplicate command %s", cmd.Name)
 		}
-		seen[name] = struct{}{}
+		seen[cmd.Name] = struct{}{}
 	}
 	return nil
 }
@@ -149,11 +147,6 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	}
 	pkgDir := filepath.Join(tmpDir, "src")
 
-	// Collect all packages that we need to actually re-write.
-	/*if err := checkDuplicate(cmdPaths); err != nil {
-		return err
-	}*/
-
 	// Ask go about all the commands in one batch for dependency caching.
 	cmds, err := bbinternal.NewPackages(opts.Env, opts.CommandPaths...)
 	if err != nil {
@@ -162,6 +155,12 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	if len(cmds) == 0 {
 		return fmt.Errorf("no valid commands given")
 	}
+
+	// Collect all packages that we need to actually re-write.
+	if err := checkDuplicate(cmds); err != nil {
+		return err
+	}
+
 	modules := make(map[string]struct{})
 	var numNoModule int
 	for _, cmd := range cmds {
