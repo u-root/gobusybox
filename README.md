@@ -12,8 +12,8 @@ determine which command is being called.
 | ---------- | ----------------------------------------------------- |
 | Go version | 1.13+                                                 |
 | Packaging  | Go modules, Go vendoring, bazel w/ [rules_go](https\://github.com/bazelbuild/rules_go) |
-| `GOOS`     | linux                                                 |
-| `GOARCH`   | amd64, arm, arm64                                     |
+| `GOOS`     | linux (others may work, but untested)                 |
+| `GOARCH`   | amd64, arm, arm64, riscv64 (others may work, but untested) |
 | CGO        | *Not supported*                                       |
 
 Other `GOARCH` and `GOOS` architectures are likely to work as well, but are
