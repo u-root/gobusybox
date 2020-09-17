@@ -296,6 +296,8 @@ jobs:
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
             bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:uroot_bb
+            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:bb
 
   build-bazel-test:
     <<: *bazel-template
