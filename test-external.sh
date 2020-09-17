@@ -52,7 +52,12 @@ cmp bb1 bb2 || (echo "building u-root is not reproducible" && exit 1)
 rm bb1 bb2
 
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+GOARCH=arm64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
 GOARM=5 GOARCH=arm GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/core/* $TMPDIR/u-bmc/cmd/* $TMPDIR/u-bmc/platform/quanta-f06-leopard-ddr3/cmd/*
+
+if grep -q -v "go1.13" <<< "$($GO version)"; then
+  GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+fi
 
 rm -rf $TMPDIR
 # https://github.com/golang/go/issues/27455
@@ -68,5 +73,10 @@ trap ctrl_c INT
 
 (cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 github.com/u-root/u-root/cmds/...
+GOARCH=arm64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 github.com/u-root/u-root/cmds/...
+
+if grep -q -v "go1.13" <<< "$($GO version)"; then
+  GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 github.com/u-root/u-root/cmds/...
+fi
 
 rm -rf $GOPATH_TMPDIR bb3
