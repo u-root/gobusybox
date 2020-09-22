@@ -23,6 +23,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -35,6 +36,11 @@ import (
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/u-root/pkg/cp"
 )
+
+// The Go spec defines the following grammar:
+//   identifier = letter { letter | unicode_digit } .
+// See also https://golang.org/ref/spec#Identifiers
+var pnameRegex = regexp.MustCompile("[^a-zA-Z0-9_]+")
 
 // ParseAST parses the given files for a package named name.
 //
@@ -471,7 +477,9 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	hasMain := false
 
 	// Change the package name declaration from main to the command's name.
-	f.Name.Name = p.Name
+	// Remove all non-alphanumeric characters except for underscore and ensure
+	// starting with a letter. There are more valid identifiers though.
+	f.Name.Name = "bb" + pnameRegex.ReplaceAllString(p.Name, "")
 
 	// Map of fully qualified package name -> imported alias in the file.
 	importAliases := make(map[string]string)
