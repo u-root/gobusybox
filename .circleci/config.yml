@@ -25,6 +25,10 @@ templates:
     docker:
       - image: circleci/golang:1.15
 
+  go116-template: &go116-template
+    docker:
+      - image: circleci/golang:1.16
+
   bazel-template: &bazel-template
     docker:
       - image: l.gcr.io/google/bazel:latest
@@ -92,6 +96,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - build-gopath-go116:
+          requires:
+            - clean-makebb
+            - clean-gopath
       - build-gomod-go113:
           requires:
             - clean-makebb
@@ -101,6 +109,10 @@ workflows:
             - clean-makebb
             - clean-gomod
       - build-gomod-go115:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-go116:
           requires:
             - clean-makebb
             - clean-gomod
@@ -116,7 +128,7 @@ workflows:
 
 jobs:
   clean-makebb:
-    <<: [*go115-template, *gomod-template]
+    <<: [*go116-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -137,7 +149,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go115-template, *gopath-template]
+    <<: [*go116-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -178,8 +190,11 @@ jobs:
   build-gopath-go115:
     <<: [*go115-template, *gopath-template, *build-gopath-template]
 
+  build-gopath-go116:
+    <<: [*go116-template, *gopath-template, *build-gopath-template]
+
   clean-gomod:
-    <<: [*go115-template, *gomod-template]
+    <<: [*go116-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -233,6 +248,9 @@ jobs:
 
   build-gomod-go115:
     <<: [*go115-template, *gomod-template, *build-gomod-template]
+
+  build-gomod-go116:
+    <<: [*go116-template, *gomod-template, *build-gomod-template]
 
   clean-bazel:
     <<: *bazel-template
