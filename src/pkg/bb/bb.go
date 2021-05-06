@@ -25,10 +25,13 @@ package bb
 
 import (
 	"fmt"
+	"io"
 	"io/ioutil"
 	"log"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/google/goterm/term"
@@ -304,7 +307,7 @@ func isReplacedModuleLocal(m *packages.Module) bool {
 // localModules finds all modules that are local, copies their go.mod in the
 // right place, and raises an error if any modules have conflicting replace
 // directives.
-func localModules(pkgDir string, mainPkgs []*bbinternal.Package) ([]string, error) {
+func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[string]*packages.Module, error) {
 	copyGoMod := func(mod *packages.Module) error {
 		if mod == nil {
 			return nil
@@ -317,7 +320,35 @@ func localModules(pkgDir string, mainPkgs []*bbinternal.Package) ([]string, erro
 		}
 
 		// Use the module file for all outside dependencies.
-		return cp.Copy(mod.GoMod, filepath.Join(pkgDir, mod.Path, "go.mod"))
+		if err := cp.Copy(mod.GoMod, filepath.Join(pkgDir, mod.Path, "go.mod")); err != nil {
+			return err
+		}
+
+		// As of Go 1.16, the Go build system expects an accurate
+		// go.sum in the main module directory. We build it by
+		// concatenating all constituent go.sums.
+		//
+		// If it doesn't exist, that's okay!
+		gosum := filepath.Join(filepath.Dir(mod.GoMod), "go.sum")
+		if err := cp.Copy(gosum, filepath.Join(pkgDir, mod.Path, "go.sum")); os.IsNotExist(err) {
+			// Modules without dependencies don't have or need a go.sum.
+			return nil
+		} else if err != nil {
+			return err
+		}
+
+		gosumf, err := os.Open(gosum)
+		if err != nil {
+			return err
+		}
+		defer gosumf.Close()
+		f, err := os.OpenFile(filepath.Join(bbDir, "go.sum"), os.O_RDWR|os.O_CREATE, 0755)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(f, gosumf)
+		return err
 	}
 
 	type localModule struct {
@@ -395,9 +426,9 @@ func localModules(pkgDir string, mainPkgs []*bbinternal.Package) ([]string, erro
 		return nil, fmt.Errorf("conflicting module dependencies found")
 	}
 
-	var modules []string
-	for modPath := range localModules {
-		modules = append(modules, modPath)
+	modules := make(map[string]*packages.Module)
+	for modPath, mod := range localModules {
+		modules[modPath] = mod.m
 	}
 	return modules, nil
 }
@@ -430,7 +461,7 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 	// Remote dependencies are expected to be resolved from main packages'
 	// go.mod and local dependencies' go.mod files, which all must be in
 	// the tree.
-	localModules, err := localModules(pkgDir, mainPkgs)
+	localModules, err := localModules(pkgDir, bbDir, mainPkgs)
 	if err != nil {
 		return err
 	}
@@ -480,8 +511,22 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 		// The module name is something that'll never be online, lest Go
 		// decides to go on the internet.
 		content := `module bb.u-root.com/bb`
-		for _, mpath := range localModules {
-			content += fmt.Sprintf("\nreplace %s => ../../%s\n", mpath, mpath)
+		for mpath, module := range localModules {
+			v := module.Version
+			if len(v) == 0 {
+				// When we don't know the version, we can plug
+				// in a "Go-generated" version number to get
+				// past the validation in the compiler.
+				//
+				// We don't always do this because if the
+				// module path has a /v2 or /v3, Go expects the
+				// version number to match. So we use the
+				// module.Version when available, because it's
+				// the most accurate thing.
+				v = "v0.0.0"
+			}
+			content += fmt.Sprintf("\nrequire %s %s\n", mpath, v)
+			content += fmt.Sprintf("replace %s => ../../%s\n", mpath, mpath)
 		}
 
 		// TODO(chrisko): add other go.mod files' replace and exclude
@@ -494,6 +539,17 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 		return nil
 	}
 	return nil
+}
+
+func versionNum(mpath string) string {
+	last := path.Base(mpath)
+	if len(last) == 0 {
+		return "v0"
+	}
+	if matched, _ := regexp.Match("v[0-9]+", []byte(last)); matched {
+		return last
+	}
+	return "v0"
 }
 
 // deps recursively iterates through imports and returns the set of packages
@@ -525,7 +581,7 @@ func locallyReplacedModules(p *packages.Package) map[string]*packages.Module {
 	return m
 }
 
-func collectDeps(p *packages.Package, localModules []string) []*packages.Package {
+func collectDeps(p *packages.Package, localModules map[string]*packages.Module) []*packages.Package {
 	if p.Module != nil {
 		// Collect all "local" dependency packages, to be copied into
 		// the temporary directory structure later.
@@ -536,7 +592,7 @@ func collectDeps(p *packages.Package, localModules []string) []*packages.Package
 			}
 
 			// Is this a dependency within a local module?
-			for _, modulePath := range localModules {
+			for modulePath := range localModules {
 				if strings.HasPrefix(pkg.PkgPath, modulePath) {
 					return true
 				}
