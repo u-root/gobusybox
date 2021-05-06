@@ -6,6 +6,7 @@ templates:
     environment:
       - GOPATH: "/go"
       - CGO_ENABLED: 0
+      - GO111MODULE: "off"
 
   gomod-template: &gomod-template
     working_directory: /home/circleci/gobusybox
