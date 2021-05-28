@@ -11,7 +11,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
+	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/uflag"
 )
 
@@ -30,14 +30,14 @@ func init() {
 func main() {
 	flag.Parse()
 
-	fset, astp, _, err := bbinternal.ParseAST("main", pkgFiles)
+	fset, astp, _, err := bb.ParseAST("main", pkgFiles)
 	if err != nil {
 		log.Fatal(err)
 	}
 	if err := os.MkdirAll(*destDir, 0755); err != nil {
 		log.Fatal(err)
 	}
-	if err := bbinternal.CreateBBMainSource(fset, astp, commands, *destDir); err != nil {
+	if err := bb.CreateBBMainSource(fset, astp, commands, *destDir); err != nil {
 		log.Fatal(err)
 	}
 }

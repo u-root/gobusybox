@@ -13,8 +13,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
+	"github.com/u-root/gobusybox/src/pkg/stdgobb"
 )
 
 var (
@@ -53,17 +53,17 @@ func main() {
 		remove = true
 	}
 
-	opts := &bb.Opts{
+	opts := &stdgobb.Opts{
 		Env:          env,
 		GenSrcDir:    tmpDir,
 		CommandPaths: flag.Args(),
 		BinaryPath:   o,
 		GoBuildOpts:  bopts,
 	}
-	if err := bb.BuildBusybox(opts); err != nil {
+	if err := stdgobb.BuildBusybox(opts); err != nil {
 		l.Print(err)
-		var errGopath *bb.ErrGopathBuild
-		var errGomod *bb.ErrModuleBuild
+		var errGopath *stdgobb.ErrGopathBuild
+		var errGomod *stdgobb.ErrModuleBuild
 		if errors.As(err, &errGopath) {
 			l.Fatalf("Preserving bb generated source directory at %s due to error. To reproduce build, `cd %s` and `GO111MODULE=off GOPATH=%s go build`.", tmpDir, errGopath.CmdDir, errGopath.GOPATH)
 		} else if errors.As(err, &errGomod) {

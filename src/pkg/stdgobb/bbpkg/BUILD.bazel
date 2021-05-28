@@ -20,3 +20,22 @@ go_test(
     srcs = ["bb_test.go"],
     embed = [":bbinternal"],
 )
+
+go_library(
+    name = "bbpkg",
+    srcs = ["bb.go"],
+    importpath = "github.com/u-root/gobusybox/src/pkg/stdgobb/bbpkg",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//src/pkg/bb",
+        "//src/pkg/golang",
+        "@org_golang_x_sys//unix",
+        "@org_golang_x_tools//go/packages",
+    ],
+)
+
+go_test(
+    name = "bbpkg_test",
+    srcs = ["bb_test.go"],
+    embed = [":bbpkg"],
+)

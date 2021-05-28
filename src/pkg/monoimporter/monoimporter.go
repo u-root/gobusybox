@@ -15,7 +15,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
+	"github.com/u-root/gobusybox/src/pkg/bb"
 	"golang.org/x/tools/go/gcexportdata"
 	"golang.org/x/tools/go/packages"
 )
@@ -298,7 +298,7 @@ func Load(pkgPath string, filepaths []string, importer types.Importer) (*package
 	}
 
 	// If go_binary, bla, if go_library, bla
-	fset, astFiles, parsedFileNames, err := bbinternal.ParseAST("main", filepaths)
+	fset, astFiles, parsedFileNames, err := bb.ParseAST("main", filepaths)
 	if err != nil {
 		return nil, err
 	}
