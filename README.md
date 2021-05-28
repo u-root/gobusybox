@@ -4,6 +4,11 @@
 [![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/main)
 [![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
 
+**Contact**: best bet to reach us is the
+[#u-root-dev](https://osfw.slack.com/messages/u-root-dev) channel on the [Open
+Source Firmware Slack](https://slack.osfw.dev) ([Sign Up
+Link](https://slack.osfw.dev)).
+
 Go Busybox is a set of Go tools that allow you to compile many Go commands into
 one binary. The resulting binary uses its invocation arguments (`os.Args`) to
 determine which command is being called.
@@ -128,13 +133,6 @@ labels** (issue [#38](https://github.com/u-root/gobusybox/issues/38)).
     file an [issue](https://github.com/u-root/gobusybox/issues/new) if you
     encounter one, even if it turns out to be your own issue -- our error
     messages should be telling users what to fix and why.
-
-### Contact
-
-People who use this project tend to hang out on the
-[#u-root-dev](https://osfw.slack.com/messages/u-root-dev) channel on the
-[Open Source Firmware Slack](https://slack.osfw.dev)
-([Sign Up Link](https://slack.osfw.dev)).
 
 ## Common Dependency Conflicts
 
