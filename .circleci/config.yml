@@ -298,10 +298,12 @@ jobs:
       - run:
           name: run buildifier
           command: |
-            bazel run :buildifier -- -r .
+            go install github.com/bazelbuild/buildtools/buildifier@latest
+            buildifier -r .
+            #bazel run :buildifier -- -r .
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `bazel run :buildifier -- -r .` and then check in the changes'
+              echo 'BUILD files are out-of-date: run `buildifier -r .` and then check in the changes'
               git status --porcelain .
               exit 1
             fi
