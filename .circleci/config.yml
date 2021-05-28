@@ -299,6 +299,8 @@ jobs:
           name: run buildifier
           command: |
             bazel run :buildifier -- -r .
+            # For some reason, running buildifier or gazelle updates go.sum.
+            git checkout -- src/go.sum
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'BUILD files are out-of-date: run `bazel run :buildifier -- -r .` and then check in the changes'
