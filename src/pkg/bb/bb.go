@@ -115,13 +115,13 @@ func BuildBusybox(opts *Opts) (nerr error) {
 		dirents, err := ioutil.ReadDir(opts.GenSrcDir)
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(opts.GenSrcDir, 0700); err != nil {
-				return fmt.Errorf("could not create busybox generated source directory: %w", err)
+				return fmt.Errorf("could not create directory for busybox generated source: %w", err)
 			}
 			relTmpDir = opts.GenSrcDir
 		} else if err != nil {
-			return fmt.Errorf("could not read busybox generated source directory: %w", err)
+			return fmt.Errorf("could not read directory supplied for busybox generated source: %w", err)
 		} else if len(dirents) > 0 {
-			return fmt.Errorf("busybox generated source directory is not an empty directory")
+			return fmt.Errorf("directory supplied for busybox generated source is not an empty directory")
 		} else {
 			relTmpDir = opts.GenSrcDir
 		}
