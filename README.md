@@ -10,7 +10,7 @@ determine which command is being called.
 
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
-| Go version | 1.13+                                                 |
+| Go version | Tested are 1.13-1.16                                  |
 | Packaging  | Go modules, Go vendoring, bazel w/ [rules_go](https\://github.com/bazelbuild/rules_go) |
 | `GOOS`     | linux (others may work, but untested)                 |
 | `GOARCH`   | amd64, arm, arm64, riscv64 (others may work, but untested) |
