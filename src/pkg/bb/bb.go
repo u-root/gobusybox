@@ -52,12 +52,12 @@ func listStrings(m map[string]struct{}) []string {
 }
 
 func checkDuplicate(cmds []*bbinternal.Package) error {
-	seen := make(map[string]struct{})
+	seen := make(map[string]string)
 	for _, cmd := range cmds {
-		if _, ok := seen[cmd.Name]; ok {
-			return fmt.Errorf("failed to build with bb: found duplicate command %s", cmd.Name)
+		if path, ok := seen[cmd.Name]; ok {
+			return fmt.Errorf("failed to build with bb: found duplicate command %s (%s and %s)", cmd.Name, path, cmd.Pkg.PkgPath)
 		}
-		seen[cmd.Name] = struct{}{}
+		seen[cmd.Name] = cmd.Pkg.PkgPath
 	}
 	return nil
 }
