@@ -11,8 +11,8 @@ Example usage to create a busybox binary:
   )
 """
 
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_context", "go_library", "go_rule")
-load("@io_bazel_rules_go//go/private:rules/transition.bzl", "go_transition_rule")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_context", "go_library")
+load("@io_bazel_rules_go//go/private/rules:transition.bzl", "go_transition_rule")
 load("@io_bazel_rules_go//go/private:providers.bzl", "GoArchive", "GoLibrary", "GoSource")
 load(
     "@io_bazel_rules_go//go/platform:list.bzl",
@@ -138,7 +138,7 @@ def _go_busybox_library(ctx):
         ),
     ]
 
-go_busybox_library = go_rule(
+go_busybox_library = rule(
     implementation = _go_busybox_library,
     attrs = {
         "cmd": attr.label(
