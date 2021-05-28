@@ -34,7 +34,7 @@ import (
 	"golang.org/x/tools/imports"
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
-	"github.com/u-root/u-root/pkg/cp"
+	"github.com/u-root/uio/cp"
 )
 
 // The Go spec defines the following grammar:
