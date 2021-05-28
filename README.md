@@ -368,6 +368,7 @@ the tree still compiles.
     ├── bb.u-root.com
     │   └── bb
     │       ├── go.mod                << generated main module go.mod (see below)
+    │       ├── go.sum                << generated main module go.sum (concat of u-bmc/go.sum and u-root/go.sum)
     │       ├── main.go               << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
     │       └── pkg
     │           └── bbmain
@@ -379,7 +380,8 @@ the tree still compiles.
             │   │   ├── fan           << generated command package
             │   │   ├── login         << generated command package
             │   │   └── socreset      << generated command package
-            │   ├── go.mod            << remote dependency manifest copied from u-bmc (if module)
+            │   ├── go.mod            << copied from u-bmc (if module)
+            │   ├── go.sum            << copied from u-bmc (if module)
             │   └── pkg
             │       ├── acme          << local dependency copied from u-bmc
             │       ├── aspeed        << local dependency copied from u-bmc
@@ -391,7 +393,8 @@ the tree still compiles.
                 │       ├── cat       << generated command package
                 │       ├── ip        << generated command package
                 │       └── ls        << generated command package
-                ├── go.mod            << remote dependency manifest copied from u-root (if module)
+                ├── go.mod            << copied from u-root (if module)
+                ├── go.sum            << copied from u-root (if module)
                 └── pkg
                     ├── curl          << local dependency copied from u-root
                     ├── dhclient      << local dependency copied from u-root
@@ -426,12 +429,18 @@ Local dependencies can be many kinds, and they all need some special attention:
     compiled busybox shall respect **all** main modules' `replace` directives,
     so they must be added to the generated main module go.mod.
 
-### Generated main module go.mod
+### Generated main module go.mod & go.sum
 
 The generated main module go.mod refers packages to their local copies:
 
 ```
 package bb.u-root.com # some domain that will never exist
+
+# As of Go 1.16 these are required, even for local-only modules.
+#
+# We fill in the real version number if we know, otherwise v0.0.0.
+require github.com/u-root/u-root vN.N.N
+require github.com/u-root/u-bmc vN.N.N
 
 replace github.com/u-root/u-root => ./src/github.com/u-root/u-root
 replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
@@ -445,3 +454,6 @@ replace github.com/u-root/u-bmc => ./src/github.com/u-root/u-bmc
 If `u-root/go.mod` and `u-bmc/go.mod` contained any `replace` or `exclude`
 directives, they also need to be placed in this go.mod, which is the main module
 go.mod for `bb/main.go`.
+
+The generated `go.sum` will be a concatenation of `u-root/go.sum` and
+`u-bmc/go.sum`.
