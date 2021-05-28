@@ -342,7 +342,7 @@ func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[str
 			return err
 		}
 		defer gosumf.Close()
-		f, err := os.OpenFile(filepath.Join(bbDir, "go.sum"), os.O_RDWR|os.O_CREATE, 0755)
+		f, err := os.OpenFile(filepath.Join(bbDir, "go.sum"), os.O_RDWR|os.O_CREATE|os.O_APPEND, 0755)
 		if err != nil {
 			return err
 		}
