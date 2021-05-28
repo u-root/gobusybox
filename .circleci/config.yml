@@ -126,6 +126,26 @@ workflows:
       - build-bazel-test:
           requires:
             - clean-bazel
+  nightly:
+    triggers:
+      - schedule:
+          cron: "0 0 * * *"
+          filters:
+            branches:
+              only:
+                - main
+    jobs:
+      - build-gopath-go113
+      - build-gopath-go114
+      - build-gopath-go115
+      - build-gopath-go116
+      - build-gomod-go113
+      - build-gomod-go114
+      - build-gomod-go115
+      - build-gomod-go116
+      - build-bazel
+      - build-bazel-cross
+      - build-bazel-test
 
 jobs:
   clean-makebb:
