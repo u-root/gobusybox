@@ -292,10 +292,10 @@ jobs:
           command: |
             bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
             git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
+            if [[ -n "$(git status --porcelain deps.bzl)" ]]; then
               echo 'go.mod deps are out of sync with deps.bzl: run '
               echo '  bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies'
-              echo 'and then check in the changes'
+              echo 'and then check in the changes in deps.bzl'
               git status --porcelain .
               exit 1
             fi
