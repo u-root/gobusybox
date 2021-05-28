@@ -39,6 +39,7 @@ import (
 	"golang.org/x/tools/go/packages"
 
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
+	"github.com/u-root/gobusybox/src/pkg/bb/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/cp"
 )
@@ -151,7 +152,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	pkgDir := filepath.Join(tmpDir, "src")
 
 	// Ask go about all the commands in one batch for dependency caching.
-	cmds, err := bbinternal.NewPackages(opts.Env, opts.CommandPaths...)
+	cmds, err := findpkg.NewPackages(opts.Env, opts.CommandPaths...)
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
