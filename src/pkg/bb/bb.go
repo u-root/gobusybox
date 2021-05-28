@@ -40,7 +40,7 @@ import (
 
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
 	"github.com/u-root/gobusybox/src/pkg/golang"
-	"github.com/u-root/u-root/pkg/cp"
+	"github.com/u-root/uio/cp"
 )
 
 func listStrings(m map[string]struct{}) []string {
