@@ -35,6 +35,7 @@ import (
 	"strings"
 
 	"github.com/google/goterm/term"
+	"golang.org/x/mod/modfile"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 
@@ -511,7 +512,9 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 		//
 		// The module name is something that'll never be online, lest Go
 		// decides to go on the internet.
-		content := `module bb.u-root.com/bb`
+		var mod modfile.File
+
+		mod.AddModuleStmt("bb.u-root.com/bb")
 		for mpath, module := range localModules {
 			v := module.Version
 			if len(v) == 0 {
@@ -526,15 +529,24 @@ func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*
 				// the most accurate thing.
 				v = "v0.0.0"
 			}
-			content += fmt.Sprintf("\nrequire %s %s\n", mpath, v)
-			content += fmt.Sprintf("replace %s => ../../%s\n", mpath, mpath)
+			if err := mod.AddRequire(mpath, v); err != nil {
+				return fmt.Errorf("could not add requiring %v to go.mod: %v", mpath, err)
+			}
+			if err := mod.AddReplace(mpath, "", path.Join("..", "..", mpath), ""); err != nil {
+				return fmt.Errorf("could not add replace rule for %v to go.mod: %v", mpath, err)
+			}
+		}
+
+		gomod, err := mod.Format()
+		if err != nil {
+			return fmt.Errorf("could not generated go.mod: %v", err)
 		}
 
 		// TODO(chrisko): add other go.mod files' replace and exclude
 		// directives.
 		//
 		// Warn the user if they are potentially incompatible.
-		if err := ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), []byte(content), 0755); err != nil {
+		if err := ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), gomod, 0755); err != nil {
 			return err
 		}
 		return nil
