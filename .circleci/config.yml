@@ -55,6 +55,7 @@ templates:
             (cd test/requestconflict/mod6 && go build ./...)
             (cd test/nested && go build ./...)
             (cd test/nested/nestedmod && go build ./...)
+            (cd test/invoke/mod && go build ./...)
       - run:
           name: tests
           command: ./gobuilds.sh
@@ -305,6 +306,7 @@ jobs:
             (cd test/requestconflict/mod6 && go mod tidy && go mod verify)
             (cd test/nested && go mod tidy && go mod verify)
             (cd test/nested/nestedmod && go mod tidy && go mod verify)
+            (cd test/invoke/mod && go mod tidy && go mod verify)
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'go.mod/go.sum is out-of-date: run `go mod tidy` in the right module directories (see git status) and then check in the changes'
@@ -328,6 +330,7 @@ jobs:
             (cd test/requestconflict/mod6 && go vet ./...)
             (cd test/nested && go vet ./...)
             (cd test/nested/nestedmod && go vet ./...)
+            (cd test/invoke/mod && go vet ./...)
       - run:
           name: gofmt
           command: |

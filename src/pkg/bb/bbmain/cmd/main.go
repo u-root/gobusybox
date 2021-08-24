@@ -96,3 +96,77 @@ func main() {
 
 	run()
 }
+
+// A gobusybox has 3 possible ways of invocation:
+//
+// ## Direct
+//
+//   ./bb ls -l
+//
+// For the gobusybox, argv in this case is ["./bb", "ls", "-l"] on all OS.
+//
+//
+// ## Symlink
+//
+//   ln -s bb ls
+//   ./ls
+//
+// For the gobusybox, argv in this case is ["./ls"] on all OS.
+//
+//
+// ## Interpreted
+//
+// This way exists because Plan 9 does not have symlinks. Some Linux file
+// system such as VFAT also do not support symlinks.
+//
+//   echo "#!/bin/bb #!gobb!#" >> /tmp/ls
+//   /tmp/ls
+//
+// For the gobusybox, argv depends on the OS:
+//
+// Plan 9: ["ls", "#!gobb!#", "/tmp/ls"]
+// Linux/Unix: ["/bin/bb", "#!gobb!#", "/tmp/ls"]
+//
+// Unix and Plan 9 evaluate arguments in a #! file differently, and, further,
+// invoke the arguments in a different way.
+//
+// (1) The absolute path for /bin/bb is required, else Linux will throw an
+//     error as bb is not in the list of allowed interpreters.
+//
+// (2) On Plan 9, the arguments following the interpreter are tokenized (split
+//     on space) and on Linux, they are not. That means we should restrict
+//     ourselves to only ever using one argument in the she-bang line (#!).
+//
+// (3) Which gobusybox tool to use is always in argv[2].
+//
+// (4) Because of the differences in how arguments are presented to #! on
+//     different kernels, there should be a reasonably unique magic value so
+//     that bb can have confidence that it is running as an interpreter, rather
+//     than on the command-line in direct mode.
+//
+// The code needs to change the arguments to look like an exec: ["/tmp/ls", ...]
+//
+// In each case, the second arg must be "#!gobb!#", which is extremely
+// unlikely to appear in any other context (save testing files, of course).
+//
+// The result is that the kernel, given a path to a #!gobb#! file, will
+// read that file, then exec bin with the argument from argv[2] and any
+// additional arguments from the exec.
+func init() {
+	// Interpreted mode: If this has been run from a #!gobb!# file, it
+	// will have at least 3 args, and os.Args needs to be reconstructed.
+	if len(os.Args) > 2 && os.Args[1] == "#!gobb!#" {
+		os.Args = os.Args[2:]
+	}
+
+	m := func() {
+		if len(os.Args) == 1 {
+			log.Fatalf("Invalid busybox command: %q", os.Args)
+		}
+		// Use argv[1] as the name.
+		os.Args = os.Args[1:]
+		run()
+	}
+	bbmain.Register("bbdiagnose", bbmain.Noop, bbmain.ListCmds)
+	bbmain.RegisterDefault(bbmain.Noop, m)
+}
