@@ -63,7 +63,14 @@ templates:
           name: gobuilds
           command: ./gobuilds.sh
       - run:
-          name: build u-root & u-bmc & gokrazy & p9
+          name: build gokrazy & p9 together
+          command: ./test-multi-simple.sh
+
+  build-gomod-multi-template: &build-gomod-multi-template
+    steps:
+      - checkout
+      - run:
+          name: build u-root & gokrazy & p9 together
           command: ./test-external.sh
 
   build-gopath-template: &build-gopath-template
@@ -124,6 +131,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
+      - build-gomod-multi-go117:
+          requires:
+            - clean-makebb
+            - clean-gomod
       - build-bazel:
           requires:
             - clean-bazel
@@ -152,6 +163,7 @@ workflows:
       - build-gomod-go115
       - build-gomod-go116
       - build-gomod-go117
+      - build-gomod-multi-go117
       - build-bazel
       - build-bazel-cross
       - build-bazel-test
@@ -287,6 +299,9 @@ jobs:
 
   build-gomod-go117:
     <<: [*go117-template, *gomod-template, *build-gomod-template]
+
+  build-gomod-multi-go117:
+    <<: [*go117-template, *gomod-template, *build-gomod-multi-template]
 
   clean-bazel:
     <<: *bazel-template
