@@ -26,7 +26,7 @@ function ctrl_c() {
 trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
-(cd $TMPDIR && git clone --branch circ-dep https://github.com/hugelgupf/u-root)
+(cd $TMPDIR && git clone https://github.com/u-root/u-root)
 (cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy)
 (cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
 
