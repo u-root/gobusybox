@@ -30,6 +30,10 @@ templates:
     docker:
       - image: circleci/golang:1.16
 
+  go117-template: &go117-template
+    docker:
+      - image: circleci/golang:1.17
+
   bazel-template: &bazel-template
     docker:
       - image: l.gcr.io/google/bazel:latest
@@ -96,6 +100,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - build-gopath-go117:
+          requires:
+            - clean-makebb
+            - clean-gopath
       - build-gomod-go113:
           requires:
             - clean-makebb
@@ -109,6 +117,10 @@ workflows:
             - clean-makebb
             - clean-gomod
       - build-gomod-go116:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-go117:
           requires:
             - clean-makebb
             - clean-gomod
@@ -134,17 +146,19 @@ workflows:
       - build-gopath-go114
       - build-gopath-go115
       - build-gopath-go116
+      - build-gopath-go117
       - build-gomod-go113
       - build-gomod-go114
       - build-gomod-go115
       - build-gomod-go116
+      - build-gomod-go117
       - build-bazel
       - build-bazel-cross
       - build-bazel-test
 
 jobs:
   clean-makebb:
-    <<: [*go116-template, *gomod-template]
+    <<: [*go117-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -165,7 +179,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go116-template, *gopath-template]
+    <<: [*go117-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -209,8 +223,11 @@ jobs:
   build-gopath-go116:
     <<: [*go116-template, *gopath-template, *build-gopath-template]
 
+  build-gopath-go117:
+    <<: [*go117-template, *gopath-template, *build-gopath-template]
+
   clean-gomod:
-    <<: [*go116-template, *gomod-template]
+    <<: [*go117-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -267,6 +284,9 @@ jobs:
 
   build-gomod-go116:
     <<: [*go116-template, *gomod-template, *build-gomod-template]
+
+  build-gomod-go117:
+    <<: [*go117-template, *gomod-template, *build-gomod-template]
 
   clean-bazel:
     <<: *bazel-template
