@@ -198,10 +198,10 @@ potential conflict and potential solutions you can enact in your code:
     replace github.com/insomniacslk/dhcp => ../local/dhcp
 
     > u-bmc/go.mod
-    require github.com/insomniacslk/dhcp/v2 v2.0.0.-...
+    require github.com/insomniacslk/dhcp v1.0.2
     ```
 
-    u-root has replaced dhcp, but u-bmc still depends on the remote dhcp/v2.
+    u-root has replaced dhcp, but u-bmc still depends on the remote dhcp@v1.0.2.
 
     **Solution**: u-root drops local replace rule, or `u-bmc/go.mod` needs
     `replace github.com/insomniacslk/dhcp => $samedir/local/dhcp` as well.
