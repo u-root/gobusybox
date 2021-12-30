@@ -490,8 +490,8 @@ func findLocalModules(mainPkgs []*bbinternal.Package) (map[string]*packages.Modu
 			if l, ok := localModules[p.Module.Path]; ok && l.m.Dir != p.Module.Dir {
 				fmt.Fprintln(os.Stderr, "")
 				log.Printf("Conflicting module dependencies on %s:", p.Module.Path)
-				log.Printf("  module %s depends on it @ %s", mainPkg.Pkg.Module.Path, moduleVersionIdentifier(p.Module))
-				log.Printf("  %s depends on it @ %s", l.provenance, moduleVersionIdentifier(l.m))
+				log.Printf("  module %s depends on %s @ %s", mainPkg.Pkg.Module.Path, p.Module.Path, moduleVersionIdentifier(p.Module))
+				log.Printf("  %s depends on %s @ %s", l.provenance, l.m.Path, moduleVersionIdentifier(l.m))
 				replacePath, err := filepath.Rel(mainPkg.Pkg.Module.Dir, l.m.Dir)
 				if err != nil {
 					replacePath = l.m.Dir
