@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -43,6 +42,7 @@ import (
 	"github.com/u-root/gobusybox/src/pkg/bb/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/cp"
+	"github.com/u-root/uio/ulog"
 )
 
 func listStrings(m map[string]struct{}) []string {
@@ -107,7 +107,7 @@ type Opts struct {
 //
 // For documentation on how this works, please refer to the README at the top
 // of the repository.
-func BuildBusybox(opts *Opts) (nerr error) {
+func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	if opts == nil {
 		return fmt.Errorf("no options given for busybox build")
 	} else if err := opts.Env.Valid(); err != nil {
@@ -146,7 +146,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 		}
 		defer func() {
 			if nerr != nil {
-				log.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
+				l.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
 			} else {
 				os.RemoveAll(tmpDir)
 			}
@@ -160,7 +160,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	pkgDir := filepath.Join(tmpDir, "src")
 
 	// Ask go about all the commands in one batch for dependency caching.
-	cmds, err := findpkg.NewPackages(opts.Env, opts.CommandPaths...)
+	cmds, err := findpkg.NewPackages(l, opts.Env, opts.CommandPaths...)
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
@@ -199,7 +199,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	}
 
 	// Collect and write dependencies into pkgDir.
-	if err := copyLocalDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
+	if err := copyLocalDeps(l, opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
 		return fmt.Errorf("collecting and putting dependencies in place failed: %v", err)
 	}
 
@@ -395,7 +395,7 @@ func copyLocalGoMods(pkgDir, bbDir string, modules map[string]*packages.Module) 
 // than another). Conflicts generally only arise when a module is replaced by a
 // local directory, as Go takes care of other conflicts using
 // minimum-version-selection (MVS).
-func findLocalModules(mainPkgs []*bbinternal.Package) (map[string]*packages.Module, error) {
+func findLocalModules(l ulog.Logger, mainPkgs []*bbinternal.Package) (map[string]*packages.Module, error) {
 	type localModule struct {
 		m          *packages.Module
 		provenance string
@@ -487,17 +487,17 @@ func findLocalModules(mainPkgs []*bbinternal.Package) (map[string]*packages.Modu
 				return
 			}
 
-			if l, ok := localModules[p.Module.Path]; ok && l.m.Dir != p.Module.Dir {
+			if lm, ok := localModules[p.Module.Path]; ok && lm.m.Dir != p.Module.Dir {
 				fmt.Fprintln(os.Stderr, "")
-				log.Printf("Conflicting module dependencies on %s:", p.Module.Path)
-				log.Printf("  module %s depends on %s @ %s", mainPkg.Pkg.Module.Path, p.Module.Path, moduleVersionIdentifier(p.Module))
-				log.Printf("  %s depends on %s @ %s", l.provenance, l.m.Path, moduleVersionIdentifier(l.m))
-				replacePath, err := filepath.Rel(mainPkg.Pkg.Module.Dir, l.m.Dir)
+				l.Printf("Conflicting module dependencies on %s:", p.Module.Path)
+				l.Printf("  module %s depends on %s @ %s", mainPkg.Pkg.Module.Path, p.Module.Path, moduleVersionIdentifier(p.Module))
+				l.Printf("  %s depends on %s @ %s", lm.provenance, lm.m.Path, moduleVersionIdentifier(lm.m))
+				replacePath, err := filepath.Rel(mainPkg.Pkg.Module.Dir, lm.m.Dir)
 				if err != nil {
-					replacePath = l.m.Dir
+					replacePath = lm.m.Dir
 				}
 				fmt.Fprintln(os.Stderr, "")
-				log.Printf("%s: add `replace %s => %s` to %s", term.Bold("Suggestion to resolve"), p.Module.Path, replacePath, mainPkg.Pkg.Module.GoMod)
+				l.Printf("%s: add `replace %s => %s` to %s", term.Bold("Suggestion to resolve"), p.Module.Path, replacePath, mainPkg.Pkg.Module.GoMod)
 				fmt.Fprintln(os.Stderr, "")
 				conflict = true
 
@@ -561,8 +561,8 @@ func moduleVersionIdentifier(m *packages.Module) string {
 //
 // Then, in the generated tree's main module, we create a go.mod file with
 // replace directives for all the local modules we just copied over.
-func copyLocalDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
-	localModules, err := findLocalModules(mainPkgs)
+func copyLocalDeps(l ulog.Logger, env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
+	localModules, err := findLocalModules(l, mainPkgs)
 	if err != nil {
 		return err
 	}
