@@ -183,7 +183,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 		}
 	}
 	if !opts.AllowMixedMode && len(modules) > 0 && numNoModule > 0 {
-		return fmt.Errorf("busybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(listStrings(modules), ", "))
+		return fmt.Errorf("gobusybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(listStrings(modules), ", "))
 	}
 
 	// List of packages to import in the real main file.
@@ -199,7 +199,7 @@ func BuildBusybox(opts *Opts) (nerr error) {
 	}
 
 	// Collect and write dependencies into pkgDir.
-	if err := dealWithDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
+	if err := copyLocalDeps(opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
 		return fmt.Errorf("collecting and putting dependencies in place failed: %v", err)
 	}
 
@@ -218,6 +218,9 @@ func BuildBusybox(opts *Opts) (nerr error) {
 		// get builds to work. Sorting is only necessary when we merge
 		// more than one go.sum file (i.e. we are compiling commands
 		// from more than one module, e.g. u-root and u-bmc).
+		//
+		// This can only be done after writeBBMain, as it reads what
+		// main.go depends on and prunes everything that isn't needed.
 		cmd := opts.Env.GoCmd("mod", "tidy")
 		cmd.Dir = bbDir
 		if o, err := cmd.CombinedOutput(); err != nil {
@@ -332,10 +335,9 @@ func isReplacedModuleLocal(m *packages.Module) bool {
 	return strings.HasPrefix(m.Path, "./") || strings.HasPrefix(m.Path, "../") || strings.HasPrefix(m.Path, "/")
 }
 
-// localModules finds all modules that are local, copies their go.mod in the
-// right place, and raises an error if any modules have conflicting replace
-// directives.
-func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[string]*packages.Module, error) {
+// copyLocalGoMods copies the go.sum and go.mod of all modules that are locally
+// present in the file system into the right place in the generated tree.
+func copyLocalGoMods(pkgDir, bbDir string, modules map[string]*packages.Module) error {
 	copyGoMod := func(mod *packages.Module) error {
 		if mod == nil {
 			return nil
@@ -379,10 +381,26 @@ func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[str
 		return err
 	}
 
+	for modPath, mod := range modules {
+		if err := copyGoMod(mod); err != nil {
+			return fmt.Errorf("failed to copy go.mod for %s: %v", modPath, err)
+		}
+	}
+	return nil
+}
+
+// findLocalModules finds all modules that are locally present on the file
+// system and raises an error if any modules dependencies conflict with each
+// other (e.g. because one module requests a different `replace` dependency
+// than another). Conflicts generally only arise when a module is replaced by a
+// local directory, as Go takes care of other conflicts using
+// minimum-version-selection (MVS).
+func findLocalModules(mainPkgs []*bbinternal.Package) (map[string]*packages.Module, error) {
 	type localModule struct {
 		m          *packages.Module
 		provenance string
 	}
+
 	localModules := make(map[string]*localModule)
 
 	// These are all modules that the user requested to compile commands
@@ -393,9 +411,6 @@ func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[str
 				localModules[p.Pkg.Module.Path] = &localModule{
 					m:          p.Pkg.Module,
 					provenance: fmt.Sprintf("your request to compile %s", p.Pkg.PkgPath),
-				}
-				if err := copyGoMod(p.Pkg.Module); err != nil {
-					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg.Module.Path, err)
 				}
 			}
 		}
@@ -433,10 +448,6 @@ func localModules(pkgDir, bbDir string, mainPkgs []*bbinternal.Package) (map[str
 				localModules[modPath] = &localModule{
 					m:          module,
 					provenance: fmt.Sprintf("%s's go.mod (%s)", p.Pkg.Module.Path, p.Pkg.Module.GoMod),
-				}
-
-				if err := copyGoMod(module); err != nil {
-					return nil, fmt.Errorf("failed to copy go.mod for %s: %v", p.Pkg.Module.Path, err)
 				}
 			}
 		}
@@ -520,37 +531,54 @@ func moduleVersionIdentifier(m *packages.Module) string {
 	return fmt.Sprintf("version %s", m.Version)
 }
 
-// dealWithDeps tries to suss out local files that need to be in the tree.
+// copyLocalDeps tries to suss out local files that need to be in the generated tree.
+//
+// It copies files from all dependency packages and modules that need to be in
+// the generated tree, but NOT for the main commands that are going to be
+// rewritten.
 //
 // It helps to have read https://golang.org/ref/mod when editing this function.
-func dealWithDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
-	// Module-enabled Go programs resolve their dependencies in one of two ways:
-	//
-	// - locally, if the dependency is *in* the module or there is a local replace directive
-	// - remotely, if not local
-	//
-	// I.e. if the module is github.com/u-root/u-root,
-	//
-	// - local: github.com/u-root/u-root/pkg/uio
-	// - remote: github.com/hugelgupf/p9/p9
-	// - also local: a remote module, with a local replace rule
-	//
-	// For local dependencies, we copy all dependency packages' files over,
-	// as well as their go.mod files.
-	//
-	// Remote dependencies are expected to be resolved from main packages'
-	// go.mod and local dependencies' go.mod files, which all must be in
-	// the tree.
-	localModules, err := localModules(pkgDir, bbDir, mainPkgs)
+//
+// Module-enabled Go programs resolve their dependencies in one of two ways:
+//
+// - versioned dependencies: via a version control system at a specific
+//   version, potentially remotely downloaded
+//
+// - locally: a module that is either `replace`d with a local file system
+//   directory, or a command that is being built from a module that is on the
+//   local file system (e.g. ./makebb ../u-root/cmds/core/ip -- here, ../u-root
+//   will be a local directory module)
+//
+// Go minimum version selection (MVS) will take care of all versioned
+// dependencies on its own.
+//
+// *We* have to take care of all files that are in local modules: everything
+// required for compilation of the gobusybox within local modules has to be
+// copied to the generated tree.
+//
+// For local dependencies, we copy all dependency packages' files over, as well
+// as the local modules' go.sum and go.mod files.
+//
+// Then, in the generated tree's main module, we create a go.mod file with
+// replace directives for all the local modules we just copied over.
+func copyLocalDeps(env golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
+	localModules, err := findLocalModules(mainPkgs)
 	if err != nil {
 		return err
 	}
+	// Copy go.sum and go.mod files for all local modules to the generated tree.
+	if err := copyLocalGoMods(pkgDir, bbDir, localModules); err != nil {
+		return err
+	}
 
+	// Find all packages that need to be copied over to the generated tree.
+	//
+	// This is going to be all the source code that
+	//   (a) a requested command depends on (one of mainPkgs), AND
+	//   (b) that is in one of the localModules.
 	var localDepPkgs []*packages.Package
 	for _, p := range mainPkgs {
 		// Find all dependency packages that are *within* module boundaries for this package.
-		//
-		// writeDeps also copies the go.mod into the right place.
 		localDeps := collectDeps(p.Pkg, localModules)
 		localDepPkgs = append(localDepPkgs, localDeps...)
 	}
