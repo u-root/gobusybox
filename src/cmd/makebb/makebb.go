@@ -29,7 +29,7 @@ func main() {
 	flag.Parse()
 
 	// Why doesn't the log package export this as a default?
-	l := log.New(os.Stdout, "", log.LstdFlags)
+	l := log.New(os.Stdout, "", log.Ltime)
 
 	o, err := filepath.Abs(*outputPath)
 	if err != nil {
@@ -62,7 +62,7 @@ func main() {
 		GoBuildOpts:  bopts,
 		GenerateOnly: *genOnly,
 	}
-	if err := bb.BuildBusybox(opts); err != nil {
+	if err := bb.BuildBusybox(l, opts); err != nil {
 		l.Print(err)
 		var errGopath *bb.ErrGopathBuild
 		var errGomod *bb.ErrModuleBuild
