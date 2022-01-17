@@ -5,7 +5,6 @@
 package findpkg
 
 import (
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -13,24 +12,7 @@ import (
 )
 
 func TestModules(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-modules-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd1"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd2"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd3"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd4"), 0755)
-	os.MkdirAll(filepath.Join(dir, "nomod/cmd/cmd7"), 0755)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod2/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod2/go.mod"), nil, 0644)
-
+	dir := t.TempDir()
 	paths := []string{
 		filepath.Join(dir, "mod1/cmd/cmd1"),
 		filepath.Join(dir, "mod1/cmd/cmd2"),
@@ -40,6 +22,24 @@ func TestModules(t *testing.T) {
 		filepath.Join(dir, "mod2/cmd/cmd4"),
 		filepath.Join(dir, "nomod/cmd/cmd7"),
 	}
+	files := []string{
+		filepath.Join(dir, "mod1/go.mod"),
+		filepath.Join(dir, "mod1/nestedmod1/go.mod"),
+		filepath.Join(dir, "mod1/nestedmod2/go.mod"),
+		filepath.Join(dir, "mod2/go.mod"),
+	}
+
+	for _, path := range paths {
+		if err := os.MkdirAll(path, 0o755); err != nil {
+			t.Errorf("Failed to create dir: %v", err)
+		}
+	}
+	for _, file := range files {
+		if err := os.WriteFile(file, nil, 0o644); err != nil {
+			t.Errorf("Failed to create file: %v", err)
+		}
+	}
+
 	mods, noModulePkgs := modules(paths)
 
 	want := map[string][]string{
