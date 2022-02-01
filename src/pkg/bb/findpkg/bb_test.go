@@ -15,6 +15,7 @@ import (
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
+	"golang.org/x/tools/go/packages"
 )
 
 const (
@@ -209,6 +210,35 @@ func TestLoadFSPackages(t *testing.T) {
 			} else if (err != nil && tt.wantErr == nil) || (err == nil && tt.wantErr != nil) {
 				t.Errorf("loadFSPackages() err = %v, want: %v", err, tt.wantErr)
 			}
+		})
+	}
+}
+
+func TestAddPkg(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		pkg  packages.Package
+	}{
+		{
+			name: "empty package",
+			pkg:  packages.Package{},
+		},
+		{
+			name: "not main",
+			pkg: packages.Package{
+				Name:    "cmd",
+				GoFiles: []string{"cmd.go"},
+			},
+		},
+		{
+			name: "error",
+			pkg: packages.Package{
+				Errors: []packages.Error{{Msg: "error"}},
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			addPkg(ulog.Null, nil, &tt.pkg)
 		})
 	}
 }
