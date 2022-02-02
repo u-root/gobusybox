@@ -5,6 +5,7 @@
 package findpkg
 
 import (
+	"errors"
 	"go/build"
 	"os"
 	"path/filepath"
@@ -239,6 +240,55 @@ func TestAddPkg(t *testing.T) {
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			addPkg(ulog.Null, nil, &tt.pkg)
+		})
+	}
+}
+
+func TestNewPackages(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		modules  string
+		pkgNames []string
+		wantErr  error
+	}{
+		{
+			name:    "empty path",
+			modules: "on",
+			pkgNames: []string{
+				"",
+			},
+			wantErr: nil,
+		},
+		{
+			name:    "filepath",
+			modules: "on",
+			pkgNames: []string{
+				"./",
+			},
+			wantErr: nil,
+		},
+		{
+			name:    "invalid filesystem path",
+			modules: "on",
+			pkgNames: []string{
+				"/bogus",
+			},
+			wantErr: errors.New("could not load packages from file system"),
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			env := golang.Environ{
+				Context:     build.Default,
+				GO111MODULE: tt.modules,
+			}
+
+			if _, err := NewPackages(ulog.Null, env, tt.pkgNames...); err != nil && tt.wantErr != nil {
+				if !strings.Contains(err.Error(), tt.wantErr.Error()) {
+					t.Errorf("loadFSPackages() err = %v, want: %v", err, tt.wantErr)
+				}
+			} else if (err != nil && tt.wantErr == nil) || (err == nil && tt.wantErr != nil) {
+				t.Errorf("loadFSPackages() err = %v, want: %v", err, tt.wantErr)
+			}
 		})
 	}
 }
