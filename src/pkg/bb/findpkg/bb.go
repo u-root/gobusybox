@@ -127,9 +127,9 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 
 // NewPackages collects package metadata about all named packages.
 //
-// names can either be directory paths or Go import paths.
+// Names have to be directory paths. If import paths are provided,
+// an error will be returned.
 func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinternal.Package, error) {
-	var goImportPaths []string
 	var filesystemPaths []string
 
 	for _, name := range names {
@@ -138,20 +138,11 @@ func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinter
 		} else if _, err := os.Stat(name); err == nil {
 			filesystemPaths = append(filesystemPaths, name)
 		} else {
-			goImportPaths = append(goImportPaths, name)
+			return nil, fmt.Errorf("not a filesystem path %q", name)
 		}
 	}
 
 	var ps []*packages.Package
-	if len(goImportPaths) > 0 {
-		importPkgs, err := loadPkgs(env, "", goImportPaths...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
-		}
-		for _, p := range importPkgs {
-			ps, err = addPkg(l, ps, p)
-		}
-	}
 
 	pkgs, err := loadFSPackages(l, env, filesystemPaths)
 	if err != nil {
