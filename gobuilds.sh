@@ -7,4 +7,5 @@ set -eux
 (cd ./test/nested && ./test.sh)
 (cd ./test/implicitimport && ./test.sh)
 (cd ./test/nameconflict && ./test.sh)
+(cd ./test/goembed && ./test.sh)
 (cd ./test/12-fancy-cmd && ./test.sh)
