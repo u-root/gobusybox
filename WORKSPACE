@@ -60,6 +60,6 @@ load("@bazel_gazelle//:deps.bzl", "go_repository")
 
 go_repository(
     name = "com_github_u-root_u-root",
-    commit = "c75233be95f9638766866a428325b46968a7ff01",
+    commit = "5be789964f562ae78cc5e41899f26c7c01b3a645",
     importpath = "github.com/u-root/u-root",
 )
