@@ -27,7 +27,7 @@ trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
 (cd $TMPDIR && git clone https://github.com/u-root/u-root)
-(cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy)
+(cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 1c3bb2365452542d52263bd4eeaafec0b83e90e2)
 (cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
 
 # Make u-root have modules.
