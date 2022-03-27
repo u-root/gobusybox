@@ -36,10 +36,10 @@ templates:
 
   bazel-template: &bazel-template
     docker:
-      - image: l.gcr.io/google/bazel:latest
-    working_directory: /go/bazel_gobusybox
+      - image: us-docker.pkg.dev/u-root-ci/gobusybox/test-bazel:v0.0.1
+    working_directory: /home/circleci/go/bazel_gobusybox
     environment:
-      - GOPATH: "/go"
+      - GOPATH: "/home/circleci/go"
     resource_class: large
 
   build-gomod-template: &build-gomod-template
