@@ -246,12 +246,14 @@ jobs:
           name: go mod tidy
           command: |
             (cd src && go mod tidy && go mod verify)
+            (cd test && go mod tidy && go mod verify)
             (cd test/diamonddep/mod1 && go mod tidy && go mod verify)
             # NOTE: Specifically do NOT tidy test/diamondeps/mod2. It doesn't
             # build on its own locally due to the mutual dependency; and we do
             # not want hashes of our own repository in here -- they'll always be
             # out of date.
             (cd test/diamonddep/mod3 && go mod tidy && go mod verify)
+            (cd test/goembed && go mod tidy && go mod verify)
             (cd test/normaldeps/mod1 && go mod tidy && go mod verify)
             (cd test/normaldeps/mod2 && go mod tidy && go mod verify)
             (cd test/requestconflict/mod5 && go mod tidy && go mod verify)
@@ -269,10 +271,12 @@ jobs:
           name: vet
           command: |
             (cd src && go vet ./...)
+            (cd test && go vet ./...)
             (cd test/diamonddep/mod1 && go vet ./...)
             # test/diamonddep/mod2 doesn't build locally on its own due to
             # mutual dependency.
             (cd test/diamonddep/mod3 && go vet ./...)
+            (cd test/goembed && go vet ./...)
             (cd test/normaldeps/mod1 && go vet ./...)
             (cd test/normaldeps/mod2 && go vet ./...)
             (cd test/requestconflict/mod5 && go vet ./...)
