@@ -1,11 +1,8 @@
 #!/bin/bash
 set -eux
 
-(cd ./test/normaldeps && ./test.sh)
-(cd ./test/diamonddep && ./test.sh)
+# This one hasn't been migrated to the go test yet.
 (cd ./test/requestconflict && ./test.sh)
-(cd ./test/nested && ./test.sh)
-(cd ./test/implicitimport && ./test.sh)
-(cd ./test/nameconflict && ./test.sh)
-(cd ./test/goembed && ./test.sh)
-(cd ./test/12-fancy-cmd && ./test.sh)
+
+(cd ./src/cmd/makebb && GO111MODULE=on go build .)
+(cd ./test && go test --makebb=../src/cmd/makebb/makebb -v)
