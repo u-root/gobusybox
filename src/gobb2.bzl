@@ -90,6 +90,7 @@ def _go_busybox_library(ctx):
 
     transitiveDepTargets = ctx.attr.cmd[GoDepInfo].targets
 
+    pkgDirName = ""
     for f in ctx.attr.cmd[GoSource].srcs:
         args.add("--source", f.path)
         inputSrcs.append(f)
@@ -97,7 +98,8 @@ def _go_busybox_library(ctx):
         # This relies on f.basename being relative to output_dir, which
         # they should be since they're relative to gen.. It's a
         # bit of a hack.
-        outf = go.actions.declare_file("%s/gen2/%s" % (f.dirname, f.basename))
+        outf = go.actions.declare_file("%s/%s" % (f.dirname, f.basename))
+        pkgDirName = f.dirname
         outputs.append(outf)
         if not output_dir:
             output_dir = outf.dirname
@@ -117,11 +119,35 @@ def _go_busybox_library(ctx):
         executable = ctx.executable._rewrite_ast,
     )
 
+    # rules_go requires that embedsrcs live in the same directory as the source
+    # files. It validates this by looking at the directories of every source
+    # file and checking if the embed files are relative to them. Since all the
+    # source files are in the generated output directory, we also need to copy
+    # the embedsrcs into the output directory.
+    #
+    # "All files must be in the same logical directory or a subdirectory as
+    # source files." (rules_go go_library embedsrcs documentation)
+    embedsrcs = []
+    for f in ctx.attr.cmd[GoSource].embedsrcs:
+        outf = go.actions.declare_file(f.short_path)
+        ctx.actions.run_shell(
+            inputs = [f],
+            outputs = [outf],
+            command = "cp %s %s" % (f.path, outf.path),
+        )
+        embedsrcs.append(outf)
+
+    # In order to pass rules_go validation, the output path (derived from
+    # name), the srcs, and embedsrcs all have to be in the same directory. This
+    # is because embedsrcs are relative to source files.
+    #
+    # This is why the name is prefixed with pkgDirName.
     library = go.new_library(
-        name = ctx.attr.name,
+        name = pkgDirName + "/" + ctx.attr.name,
         go = go,
         importpath = "%s_bb" % importpath,
         srcs = outputs,
+        embedsrcs = embedsrcs,
     )
     attr = struct(
         deps = transitiveDepTargets + ctx.attr._new_deps,

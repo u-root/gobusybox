@@ -1,0 +1,17 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+
+go_library(
+    name = "goembed_lib",
+    srcs = [
+        "main.go",
+    ],
+    embedsrcs = glob(["foo/*.txt"]),
+    importpath = "github.com/u-root/gobusybox/src/bazeltest/cmd/goembed",
+    visibility = ["//visibility:private"],
+)
+
+go_binary(
+    name = "goembed",
+    embed = [":goembed_lib"],
+    visibility = ["//visibility:public"],
+)

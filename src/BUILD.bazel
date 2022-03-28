@@ -3,6 +3,7 @@ load("//src:static_test.bzl", "static_test")
 
 test_cmds = [
     "//src/bazeltest/cmd/dmesg",
+    "//src/bazeltest/cmd/goembed",
     "//src/bazeltest/cmd/helloworld",
     "//src/bazeltest/cmd/implicitimport",
     "//src/bazeltest/cmd/importsamename",
@@ -13,6 +14,13 @@ test_cmds = [
 go_busybox(
     name = "bb",
     cmds = test_cmds,
+)
+
+go_busybox(
+    name = "goembed_bb",
+    cmds = [
+        "//src/bazeltest/cmd/goembed",
+    ],
 )
 
 go_busybox(
