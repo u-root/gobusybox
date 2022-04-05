@@ -2,9 +2,9 @@ version: 2
 
 templates:
   gopath-template: &gopath-template
-    working_directory: /go/src/github.com/u-root/gobusybox
+    working_directory: /home/circleci/go/src/github.com/u-root/gobusybox
     environment:
-      - GOPATH: "/go"
+      - GOPATH: "/home/circleci/go"
       - CGO_ENABLED: 0
       - GO111MODULE: "off"
 
@@ -16,23 +16,27 @@ templates:
 
   go113-template: &go113-template
     docker:
-      - image: circleci/golang:1.13
+      - image: cimg/go:1.13
 
   go114-template: &go114-template
     docker:
-      - image: circleci/golang:1.14
+      - image: cimg/go:1.14
 
   go115-template: &go115-template
     docker:
-      - image: circleci/golang:1.15
+      - image: cimg/go:1.15
 
   go116-template: &go116-template
     docker:
-      - image: circleci/golang:1.16
+      - image: cimg/go:1.16
 
   go117-template: &go117-template
     docker:
-      - image: circleci/golang:1.17
+      - image: cimg/go:1.17
+
+  go118-template: &go118-template
+    docker:
+      - image: cimg/go:1.18
 
   bazel-template: &bazel-template
     docker:
@@ -111,6 +115,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - build-gopath-go118:
+          requires:
+            - clean-makebb
+            - clean-gopath
       - build-gomod-go113:
           requires:
             - clean-makebb
@@ -131,7 +139,15 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
+      - build-gomod-go118:
+          requires:
+            - clean-makebb
+            - clean-gomod
       - build-gomod-multi-go117:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-multi-go118:
           requires:
             - clean-makebb
             - clean-gomod
@@ -158,25 +174,28 @@ workflows:
       - build-gopath-go115
       - build-gopath-go116
       - build-gopath-go117
+      - build-gopath-go118
       - build-gomod-go113
       - build-gomod-go114
       - build-gomod-go115
       - build-gomod-go116
       - build-gomod-go117
+      - build-gomod-go118
       - build-gomod-multi-go117
+      - build-gomod-multi-go118
       - build-bazel
       - build-bazel-cross
       - build-bazel-test
 
 jobs:
   clean-makebb:
-    <<: [*go117-template, *gomod-template]
+    <<: [*go118-template, *gomod-template]
     steps:
       - checkout
       - run:
           name: check generated code
           command: |
-            mkdir -p /go/bin
+            mkdir -p /home/circleci/go/bin
             go build ./src/cmd/embedvar
             cp ./embedvar $GOPATH/bin
             export PATH=$GOPATH/bin:$PATH
@@ -191,7 +210,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go117-template, *gopath-template]
+    <<: [*go118-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -238,8 +257,11 @@ jobs:
   build-gopath-go117:
     <<: [*go117-template, *gopath-template, *build-gopath-template]
 
+  build-gopath-go118:
+    <<: [*go118-template, *gopath-template, *build-gopath-template]
+
   clean-gomod:
-    <<: [*go117-template, *gomod-template]
+    <<: [*go118-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -304,8 +326,14 @@ jobs:
   build-gomod-go117:
     <<: [*go117-template, *gomod-template, *build-gomod-template]
 
+  build-gomod-go118:
+    <<: [*go118-template, *gomod-template, *build-gomod-template]
+
   build-gomod-multi-go117:
     <<: [*go117-template, *gomod-template, *build-gomod-multi-template]
+
+  build-gomod-multi-go118:
+    <<: [*go118-template, *gomod-template, *build-gomod-multi-template]
 
   clean-bazel:
     <<: *bazel-template
