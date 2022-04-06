@@ -8,6 +8,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"go/build"
 	"io/ioutil"
 	"log"
@@ -85,6 +86,7 @@ func main() {
 	}
 
 	var gofiles []string
+	var unmatchedGofiles []string
 	for _, path := range sourceFiles {
 		dir, basename := filepath.Split(path)
 		// Check the file against build tags.
@@ -97,18 +99,7 @@ func main() {
 		} else if err != nil {
 			log.Fatalf("MatchFile failed: %v", err)
 		} else {
-			b, err := ioutil.ReadFile(path)
-			if err != nil {
-				log.Fatal(err)
-			}
-			// N.B. Hack: Blaze expects an output file for every
-			// input file, even if we decide to do nothing with the
-			// input file.  Just write a damn empty file. The
-			// compiler will automagically exclude it based on the
-			// same build tags.
-			if err := ioutil.WriteFile(filepath.Join(*destDir, basename), b, 0644); err != nil {
-				log.Fatalf("Write empty file: %v", err)
-			}
+			unmatchedGofiles = append(unmatchedGofiles, path)
 		}
 	}
 
@@ -129,5 +120,17 @@ func main() {
 	bbPkg := bbinternal.NewPackage(*name, p)
 	if err := bbPkg.Rewrite(*destDir, *bbImportPath); err != nil {
 		log.Fatalf("Rewriting failed: %v", err)
+	}
+
+	for _, path := range unmatchedGofiles {
+		_, basename := filepath.Split(path)
+		content := fmt.Sprintf("package %s\n", bbPkg.PackageName())
+
+		// N.B. Hack: Blaze expects an output file for every
+		// input file, even if we decide to do nothing with the
+		// input file. Just write a damn (near) empty file.
+		if err := ioutil.WriteFile(filepath.Join(*destDir, basename), []byte(content), 0644); err != nil {
+			log.Fatalf("Write empty file: %v", err)
+		}
 	}
 }
