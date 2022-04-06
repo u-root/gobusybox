@@ -272,11 +272,25 @@ func (i *Importer) Import(importPath string) (*types.Package, error) {
 		return pkg, nil
 	}
 
-	finders := []finder{
-		i.mapped,
-		i.unmapped,
-		i.stdlib,
-		i.stdlibZip,
+	var finders []finder
+	// stdlibZip and mapped do exact file matching based on
+	// importPath, they never return the wrong package.
+	if i.stdlibZip != nil {
+		finders = append(finders, i.stdlibZip)
+	}
+	if i.mapped != nil {
+		finders = append(finders, i.mapped)
+	}
+	// stdlib and unmapped match based on file path suffix, so they
+	// may return the wrong package. Match to stdlib first, because
+	// stdlib contains shorter paths. (E.g. "errors" can match to
+	// either "errors" in stdlib or "golang.org/x/crypto/errors"
+	// but it should match to stdlib)
+	if i.stdlib != nil {
+		finders = append(finders, i.stdlib)
+	}
+	if i.unmapped != nil {
+		finders = append(finders, i.unmapped)
 	}
 	file := find(finders, importPath)
 	if file == nil {
