@@ -180,13 +180,17 @@ exclude github.com/insomniacslk/dhcp v1.0.2
 exclude github.com/mdlayher/ethernet v1.0.3
 ```
 
-Certain conflicts can come up during this prcess. This section covers each
+Certain conflicts can come up during this process. This section covers each
 potential conflict and potential solutions you can enact in your code:
 
 1.  Conflicting local commands. E.g. two local copies of `u-root` and `u-bmc`
     are being combined into a busybox with `makebb ./u-root/cmds/core/*
     ./u-bmc/cmd/*`. If `u-bmc/go.mod` depends on u-root@v3 from GitHub, that
-    conflicts with the local `./u-root` being requested with makebb.
+    conflicts with the local `./u-root` being requested with makebb. Gobusybox
+    will select the localversion of u-root over the one from GitHub. If you
+    want that gobusybox does **not** do this, you can set the environment
+    variable `GBB_STRICT=1` to run gobusybox in strict mode. If gobusybox
+    runs in strict mode, it will fail.
 
     **Solution**: `u-bmc/go.mod` needs `replace github.com/u-root/u-root =>
     ../u-root`.

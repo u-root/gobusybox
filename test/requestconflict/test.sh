@@ -6,7 +6,7 @@ MAKEBB=../../src/cmd/makebb/makebb
 
 for GO111MODULE in on auto;
 do
-  if GO111MODULE=$GO111MODULE $MAKEBB ./mod5/cmd/mod5hello ./mod6/cmd/mod6hello; then
+  if GBB_STRICT=1 GO111MODULE=$GO111MODULE $MAKEBB ./mod5/cmd/mod5hello ./mod6/cmd/mod6hello; then
     echo "makebb should have failed for conflict"
     exit 1
   fi
