@@ -53,11 +53,11 @@ func modules(filesystemPaths []string) (map[string][]string, []string) {
 
 // We load file system paths differently, because there is a big difference between
 //
-//    go list -json ../../foobar
+//	go list -json ../../foobar
 //
 // and
 //
-//    (cd ../../foobar && go list -json .)
+//	(cd ../../foobar && go list -json .)
 //
 // Namely, PWD determines which go.mod to use. We want each
 // package to use its own go.mod, if it has one.
