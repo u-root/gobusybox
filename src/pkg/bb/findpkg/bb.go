@@ -154,6 +154,9 @@ func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinter
 		}
 		for _, p := range importPkgs {
 			ps, err = addPkg(l, ps, p)
+			if err != nil {
+				return nil, err
+			}
 		}
 	}
 
