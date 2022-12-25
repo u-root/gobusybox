@@ -15,10 +15,12 @@
 // Binary p9ufs provides a local 9P2000.L server for the p9 package.
 //
 // To use, first start the server:
-//     p9ufs 127.0.0.1:3333
+//
+//	p9ufs 127.0.0.1:3333
 //
 // Then, connect using the Linux 9P filesystem:
-//     mount -t 9p -o trans=tcp,port=3333 127.0.0.1 /mnt
+//
+//	mount -t 9p -o trans=tcp,port=3333 127.0.0.1 /mnt
 package main
 
 import (
