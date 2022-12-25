@@ -8,6 +8,19 @@ def go_dependencies():
         version = "v0.0.0-20200907032337-555d40f16ae2",
     )
     go_repository(
+        name = "com_github_hashicorp_errwrap",
+        importpath = "github.com/hashicorp/errwrap",
+        sum = "h1:hLrqtEDnRye3+sgx6z4qVLNuviH3MR5aQ0ykNJa/UYA=",
+        version = "v1.0.0",
+    )
+    go_repository(
+        name = "com_github_hashicorp_go_multierror",
+        importpath = "github.com/hashicorp/go-multierror",
+        sum = "h1:H5DkEtf6CXdFp0N0Em5UCwQpXMWke8IA0+lD48awMYo=",
+        version = "v1.1.1",
+    )
+
+    go_repository(
         name = "com_github_u_root_uio",
         importpath = "github.com/u-root/uio",
         sum = "h1:XMAtQHwKjWHIRwg+8Nj/rzUomQY1q6cM3ncA0wP8GU4=",
