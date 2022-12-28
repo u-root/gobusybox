@@ -396,4 +396,4 @@ jobs:
       - checkout
       - run:
           name: bazel test
-          command: bazel test //src/...
+          command: bazel query 'tests(//src/...) except attr(tags, notest, //src/...)' | xargs bazel test

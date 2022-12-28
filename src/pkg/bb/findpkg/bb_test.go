@@ -5,11 +5,16 @@
 package findpkg
 
 import (
+	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+
+	"github.com/u-root/gobusybox/src/pkg/golang"
+	"github.com/u-root/uio/ulog/ulogtest"
 )
 
 func TestModules(t *testing.T) {
@@ -66,5 +71,219 @@ func TestModules(t *testing.T) {
 	}
 	if !reflect.DeepEqual(noModulePkgs, wantNoModule) {
 		t.Errorf("modules() no module pkgs = %v, want %v", noModulePkgs, wantNoModule)
+	}
+}
+
+func TestResolveGlobsGobusyboxGOPATH(t *testing.T) {
+	gbbmod, err := filepath.Abs("../../../")
+	if err != nil {
+		t.Fatalf("failure to set up test: %v", err)
+	}
+	gbbroot := filepath.Dir(gbbmod)
+
+	moduleOffEnv := golang.Default()
+	moduleOffEnv.GO111MODULE = "off"
+
+	moduleOnEnv := golang.Default()
+	moduleOnEnv.GO111MODULE = "on"
+
+	if err := os.Mkdir("./test/broken", 0777); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll("./test/broken")
+	if err := ioutil.WriteFile("./test/broken/main.go", []byte("broken"), 0777); err != nil {
+		t.Fatal(err)
+	}
+
+	l := &ulogtest.Logger{TB: t}
+
+	for _, tc := range []struct {
+		envs    []golang.Environ
+		name    string
+		wd      string
+		in      []string
+		want    []string
+		wantErr bool
+		err     error
+	}{
+		// Nonexistent Package
+		{
+			name:    "fakepackage",
+			in:      []string{"fakepackagename"},
+			wantErr: true,
+		},
+		// Single package, file system path.
+		{
+			name: "fspath-single",
+			in:   []string{filepath.Join(gbbmod, "cmd/makebb")},
+			want: []string{filepath.Join(gbbmod, "cmd/makebb")},
+		},
+		// Single package, Go package path.
+		{
+			name: "pkgpath-single",
+			in:   []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+		},
+		// Two packages, globbed file system path.
+		{
+			name: "fspath-glob",
+			in:   []string{filepath.Join(gbbmod, "cmd/make*")},
+			want: []string{filepath.Join(gbbmod, "cmd/makebb"), filepath.Join(gbbmod, "cmd/makebbmain")},
+		},
+		// Two packages, globbed Go package path.
+		{
+			name: "pkgpath-glob",
+			in:   []string{"github.com/u-root/gobusybox/src/cmd/make*"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
+		},
+		// Globbed file system path of non-existent packages.
+		{
+			name:    "fspath-glob-doesnotexist",
+			in:      []string{filepath.Join(gbbmod, "cmd/makeq*")},
+			wantErr: true,
+			err:     errNoMatch,
+		},
+		// Globbed package path of non-existent packages.
+		{
+			name:    "pkgpath-glob-doesnotexist",
+			in:      []string{"github.com/u-root/gobusybox/src/cmd/makeq*"},
+			wantErr: true,
+			err:     errNoMatch,
+		},
+		// Two packages (file system paths), one excluded by build constraints.
+		{
+			name: "fspath-log-buildconstrained",
+			in:   []string{"./test/buildconstraint", filepath.Join(gbbmod, "cmd/makebb")},
+			want: []string{filepath.Join(gbbmod, "cmd/makebb")},
+		},
+		// Two packages (Go package paths), one excluded by build constraints.
+		{
+			name: "pkgpath-log-buildconstrained",
+			in:   []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/buildconstraint", "github.com/u-root/gobusybox/src/cmd/makebb"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+		},
+		// Package excluded by build constraints (file system paths).
+		{
+			name:    "fspath-log-buildconstrained-onlyone",
+			in:      []string{"./test/buildconstraint"},
+			err:     errNoMatch,
+			wantErr: true,
+		},
+		// Package excluded by build constraints (Go package paths).
+		{
+			name:    "pkgpath-log-buildconstrained-onlyone",
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/buildconstraint"},
+			err:     errNoMatch,
+			wantErr: true,
+		},
+		// Go glob support (Go package path).
+		{
+			name: "pkgpath-go-glob",
+			in:   []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/..."},
+			want: []string{
+				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
+				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
+			},
+		},
+		// Go glob support (relative Go package path).
+		{
+			name: "pkgpath-relative-go-glob",
+			in:   []string{"./test/goglob/..."},
+			want: []string{
+				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
+				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
+			},
+		},
+		// Go glob support ("relative" Go package path, without ./ -- follows Go semantics).
+		//
+		// This is actually just a Go package path, and not
+		// interpreted as a file system path by the Go lookup
+		// (because they must be able to distinguish between
+		// "cmd/compile" and "./cmd/compile").
+		{
+			name:    "pkgpath-relative-go-glob-broken",
+			in:      []string{"test/goglob/..."},
+			wantErr: true,
+			err:     errNoMatch,
+		},
+		{
+			name:    "fspath-empty-directory",
+			in:      []string{"./test/empty"},
+			wantErr: true,
+		},
+		{
+			name:    "pkgpath-empty-directory",
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/empty"},
+			wantErr: true,
+		},
+		{
+			name:    "fspath-broken-go",
+			in:      []string{"./test/broken"},
+			wantErr: true,
+		},
+		{
+			name:    "pkgpath-broken-go",
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/broken"},
+			wantErr: true,
+		},
+		{
+			name:    "fspath-glob-with-errors",
+			in:      []string{"./test/*"},
+			wantErr: true,
+		},
+		{
+			name:    "pkgpath-glob-with-errors",
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/*"},
+			wantErr: true,
+		},
+		{
+			name: "fspath-multi-module",
+			in: []string{
+				filepath.Join(gbbmod, "cmd/makebb"),
+				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
+			},
+			want: []string{
+				filepath.Join(gbbmod, "cmd/makebb"),
+				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
+			},
+		},
+		{
+			// Unless we put u-root and p9 in GOPATH in the local
+			// version of this test, this is an ON only test.
+			envs: []golang.Environ{moduleOnEnv},
+			name: "pkgpath-multi-module",
+			wd:   filepath.Join(gbbroot, "test/resolve-modules"),
+			in: []string{
+				"github.com/u-root/u-root/cmds/core/init",
+				"github.com/u-root/u-root/cmds/core/ip",
+				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/hugelgupf/p9/cmd/p9ufs",
+			},
+			want: []string{
+				"github.com/hugelgupf/p9/cmd/p9ufs",
+				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/u-root/u-root/cmds/core/init",
+				"github.com/u-root/u-root/cmds/core/ip",
+			},
+		},
+	} {
+		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
+		if tc.envs != nil {
+			envs = tc.envs
+		}
+		for _, env := range envs {
+			t.Run(fmt.Sprintf("GO111MODULE=%s-%s", env.GO111MODULE, tc.name), func(t *testing.T) {
+				out, err := ResolveGlobs(l, env, tc.wd, tc.in)
+				if tc.err != nil && !errors.Is(err, tc.err) {
+					t.Errorf("ResolveGlobs(%q, %v) = %v, want %v", tc.wd, tc.in, err, tc.err)
+				}
+				if (err != nil) != tc.wantErr {
+					t.Errorf("ResolveGlobs(%q, %v) = (%v, %v), wantErr is %t", tc.wd, tc.in, out, err, tc.wantErr)
+				}
+				if !reflect.DeepEqual(out, tc.want) {
+					t.Errorf("ResolveGlobs(%q, %v) = %#v; want %#v", tc.wd, tc.in, out, tc.want)
+				}
+			})
+		}
 	}
 }

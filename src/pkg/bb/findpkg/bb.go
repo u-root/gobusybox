@@ -7,21 +7,18 @@
 package findpkg
 
 import (
-	"errors"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
-
-	"golang.org/x/sys/unix"
-	"golang.org/x/tools/go/packages"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
+	"golang.org/x/tools/go/packages"
 )
 
 // modules returns a list of module directories => directories of packages
@@ -52,7 +49,30 @@ func modules(filesystemPaths []string) (map[string][]string, []string) {
 	return moduledPackages, noModulePkgs
 }
 
-// We load file system paths differently, because there is a big difference between
+// Find each packages' module, and batch package queries together by module.
+//
+// Query all packages that don't have a module at all together, as well.
+//
+// Batching these queries saves a *lot* of time; on the order of
+// several minutes for 30+ commands.
+func batchFSPackages(l ulog.Logger, absPaths []string, loadFunc func(moduleDir string, dirs []string) error) error {
+	mods, noModulePkgDirs := modules(absPaths)
+
+	for moduleDir, pkgDirs := range mods {
+		if err := loadFunc(moduleDir, pkgDirs); err != nil {
+			return err
+		}
+	}
+
+	if len(noModulePkgDirs) > 0 {
+		if err := loadFunc(noModulePkgDirs[0], noModulePkgDirs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// We look up file system paths differently, because there is a big difference between
 //
 //	go list -json ../../foobar
 //
@@ -62,52 +82,29 @@ func modules(filesystemPaths []string) (map[string][]string, []string) {
 //
 // Namely, PWD determines which go.mod to use. We want each
 // package to use its own go.mod, if it has one.
-func loadFSPackages(l ulog.Logger, env golang.Environ, filesystemPaths []string) ([]*packages.Package, error) {
-	var absPaths []string
-	for _, fsPath := range filesystemPaths {
-		absPath, err := filepath.Abs(fsPath)
-		if err != nil {
-			return nil, fmt.Errorf("could not find package at %q", fsPath)
-		}
-		absPaths = append(absPaths, absPath)
-	}
-
+//
+// The easiest implementation would be to do (cd $packageDir && go list -json
+// .), however doing that N times is very expensive -- takes several minutes
+// for 30 packages. So here, we figure out every module involved and do one
+// query per module and one query for everything that isn't in a module.
+func batchLoadFSPackages(l ulog.Logger, env golang.Environ, absPaths []string) ([]*packages.Package, error) {
 	var allps []*packages.Package
 
-	// Find each packages' module, and batch package queries together by module.
-	//
-	// Query all packages that don't have a module at all together, as well.
-	//
-	// Batching these queries saves a *lot* of time; on the order of
-	// several minutes for 30+ commands.
-	mods, noModulePkgDirs := modules(absPaths)
-
-	for moduleDir, pkgDirs := range mods {
-		pkgs, err := loadFSPkgs(env, moduleDir, pkgDirs...)
+	err := batchFSPackages(l, absPaths, func(moduleDir string, packageDirs []string) error {
+		pkgs, err := loadFSPkgs(l, env, moduleDir, packageDirs...)
 		if err != nil {
-			return nil, fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
+			return fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
 		}
 		for _, pkg := range pkgs {
 			allps, err = addPkg(l, allps, pkg)
 			if err != nil {
-				return nil, err
+				return err
 			}
 		}
-	}
-
-	if len(noModulePkgDirs) > 0 {
-		// The directory we choose can be any dir that does not have a
-		// go.mod anywhere in its parent tree.
-		vendoredPkgs, err := loadFSPkgs(env, noModulePkgDirs[0], noModulePkgDirs...)
-		if err != nil {
-			return nil, fmt.Errorf("could not find packages: %v", err)
-		}
-		for _, p := range vendoredPkgs {
-			allps, err = addPkg(l, allps, p)
-			if err != nil {
-				return nil, err
-			}
-		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return allps, nil
 }
@@ -131,12 +128,52 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 
 // NewPackages collects package metadata about all named packages.
 //
-// names can either be directory paths or Go import paths.
-func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinternal.Package, error) {
+// names can either be directory paths or Go import paths, with globs.
+//
+// It skips directories that do not have Go files subject to the build
+// constraints in env and logs a "Skipping package {}" statement about such
+// directories/packages.
+//
+// Allowed formats for names:
+//
+//   - relative and absolute paths including globs following Go's filepath.Match format.
+//   - Go package paths; e.g. github.com/u-root/u-root/cmds/core/ls
+//   - Globs of Go package paths, e.g github.com/u-root/u-root/cmds/i* (using path.Match format).
+//   - Go package path expansions with ..., e.g. github.com/u-root/u-root/cmds/core/...
+//
+// If an entry starts with "-", it excludes the matching package(s).
+//
+// Examples:
+//
+//	./foobar
+//	./foobar/glob*
+//	github.com/u-root/u-root/cmds/core/...
+//	github.com/u-root/u-root/cmds/core/ip
+//	github.com/u-root/u-root/cmds/core/g*lob
+//
+// Globs of Go package paths must be within module boundaries to give accurate
+// results, i.e. a glob that spans 2 Go modules may give unpredictable results.
+func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, names ...string) ([]*packages.Package, error) {
 	var goImportPaths []string
 	var filesystemPaths []string
 
-	for _, name := range names {
+	// Two steps:
+	//
+	// 1. Resolve globs, filter packages with build constraints.
+	//    Produce an explicit list of packages.
+	//
+	// 2. Look up every piece of information necessary from those packages.
+	//    (Includes optimizations to reduce the amount of time it takes to
+	//    do type-checking, etc.)
+
+	// Step 1.
+	paths, err := ResolveGlobs(l, env, workingDirectory, names)
+	if err != nil {
+		return nil, err
+	}
+
+	// Step 2.
+	for _, name := range paths {
 		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") {
 			filesystemPaths = append(filesystemPaths, name)
 		} else if _, err := os.Stat(name); err == nil {
@@ -148,7 +185,7 @@ func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinter
 
 	var ps []*packages.Package
 	if len(goImportPaths) > 0 {
-		importPkgs, err := loadPkgs(env, "", goImportPaths...)
+		importPkgs, err := loadPkgs(env, workingDirectory, goImportPaths...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
 		}
@@ -160,11 +197,21 @@ func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinter
 		}
 	}
 
-	pkgs, err := loadFSPackages(l, env, filesystemPaths)
+	pkgs, err := batchLoadFSPackages(l, env, filesystemPaths)
 	if err != nil {
 		return nil, fmt.Errorf("could not load packages from file system: %v", err)
 	}
 	ps = append(ps, pkgs...)
+	return ps, nil
+}
+
+// NewBBPackages collects package metadata about all named packages. See
+// NewPackages for documentation on the names argument.
+func NewBBPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinternal.Package, error) {
+	ps, err := NewPackages(l, env, "", names...)
+	if err != nil {
+		return nil, err
+	}
 
 	var ips []*bbinternal.Package
 	for _, p := range ps {
@@ -176,54 +223,13 @@ func NewPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinter
 // loadFSPkgs looks up importDirs packages, making the import path relative to
 // `dir`. `go list -json` requires the import path to be relative to the dir
 // when the package is outside of a $GOPATH and there is no go.mod in any parent directory.
-func loadFSPkgs(env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
-	// Eligibility check: does each directory contain files that are
-	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
-	// tags?
-	//
-	// In Go 1.14 and Go 1.15, this is done by packages.Load on a
-	// per-package basis, which is why batching queries works out well. In
-	// Go 1.13, the entire query fails with no indication of which package
-	// made it fail, so we need to filter out commands that do not have
-	// compilable files first.
-	var compilableImportDirs []string
-	for _, importDir := range importDirs {
-		f, err := os.Open(importDir)
-		if err != nil {
-			return nil, err
-		}
-		names, err := f.Readdirnames(0)
-		if errors.Is(err, unix.ENOTDIR) {
-			return nil, fmt.Errorf("Go busybox requires a list of directories; failed to read directory %s: %v", importDir, err)
-		} else if err != nil {
-			return nil, fmt.Errorf("could not determine file names for %s: %v", importDir, err)
-		}
-		foundOne := false
-		for _, name := range names {
-			if match, err := env.Context.MatchFile(importDir, name); err != nil {
-				// This pretty much only returns an error if
-				// the file cannot be opened or read.
-				return nil, fmt.Errorf("could not determine Go build constraints of %s: %v", importDir, err)
-			} else if match {
-				foundOne = true
-				break
-			}
-		}
-		if foundOne {
-			compilableImportDirs = append(compilableImportDirs, importDir)
-		} else {
-			log.Printf("Skipping directory %s because build constraints exclude all Go files", importDir)
-		}
-	}
-
-	if len(compilableImportDirs) == 0 {
-		return nil, fmt.Errorf("build constraints excluded all requested commands")
-	}
-
+func loadFSPkgs(l ulog.Logger, env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
 	// Make all paths relative, because packages.Load/`go list -json` does
 	// not like absolute paths sometimes.
+	//
+	// N.B.(hugelgupf): I don't remember why this is here.
 	var relImportDirs []string
-	for _, importDir := range compilableImportDirs {
+	for _, importDir := range importDirs {
 		relImportDir, err := filepath.Rel(dir, importDir)
 		if err != nil {
 			return nil, fmt.Errorf("Go package path %s is not relative to %s: %v", importDir, dir, err)
@@ -245,4 +251,258 @@ func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.P
 		Dir:  dir,
 	}
 	return packages.Load(cfg, patterns...)
+}
+
+func filterDirectoryPaths(l ulog.Logger, env golang.Environ, includes []string, excludes []string) ([]string, error) {
+	var directories []string
+	for _, match := range includes {
+		// Skip anything that is not a directory, as only directories can be packages.
+		fileInfo, _ := os.Stat(match)
+		if !fileInfo.IsDir() {
+			continue
+		}
+		absPath, _ := filepath.Abs(match)
+
+		directories = append(directories, absPath)
+	}
+
+	// Exclusion doesn't have to go through the eligibility check.
+	for i, e := range excludes {
+		absPath, _ := filepath.Abs(e)
+		excludes[i] = absPath
+	}
+
+	// Eligibility check: does each directory contain files that are
+	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
+	// tags?
+	//
+	// We filter this out first, because while packages.Load will give us
+	// an error for this, it is not distinguishable from other errors. We
+	// would like to give only a warning for these.
+	//
+	// This eligibility check requires Go 1.15, as before Go 1.15 the
+	// package loader would return an error "cannot find package" for
+	// packages not meeting build constraints.
+	var allps []*packages.Package
+	err := batchFSPackages(l, directories, func(moduleDir string, packageDirs []string) error {
+		pkgs, err := lookupPkgNameAndFiles(env, moduleDir, packageDirs...)
+		if err != nil {
+			return fmt.Errorf("could not look up packages %q: %v", packageDirs, err)
+		}
+		allps = append(allps, pkgs...)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	eligiblePkgs, err := checkEligibility(l, allps)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range eligiblePkgs {
+		paths = append(paths, filepath.Dir(p.GoFiles[0]))
+	}
+	return excludePaths(paths, excludes), nil
+}
+
+func checkEligibility(l ulog.Logger, pkgs []*packages.Package) ([]*packages.Package, error) {
+	var goodPkgs []*packages.Package
+	var merr error
+	for _, p := range pkgs {
+		// If there's a build constraint issue, short out early and
+		// neither add the package nor add an error -- just log a skip
+		// note.
+		if len(p.GoFiles) == 0 && len(p.IgnoredFiles) > 0 {
+			l.Printf("Skipping package %s because build constraints exclude all Go files", p.PkgPath)
+		} else if len(p.Errors) == 0 {
+			goodPkgs = append(goodPkgs, p)
+		} else {
+			// We'll definitely return an error in the end, but
+			// we're not returning early because we want to give
+			// the user as much information as possible.
+			for _, e := range p.Errors {
+				merr = multierror.Append(merr, fmt.Errorf("package %s: %w", p.PkgPath, e))
+			}
+		}
+	}
+	if merr != nil {
+		return nil, merr
+	}
+	return goodPkgs, nil
+}
+
+func excludePaths(paths []string, exclusions []string) []string {
+	excludes := map[string]struct{}{}
+	for _, p := range exclusions {
+		excludes[p] = struct{}{}
+	}
+
+	var result []string
+	for _, p := range paths {
+		if _, ok := excludes[p]; !ok {
+			result = append(result, p)
+		}
+	}
+	return result
+}
+
+// Just looking up the stuff that doesn't take forever to parse.
+func lookupPkgNameAndFiles(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
+	cfg := &packages.Config{
+		Mode: packages.NeedName | packages.NeedFiles,
+		Env:  append(os.Environ(), env.Env()...),
+		Dir:  dir,
+	}
+	return packages.Load(cfg, patterns...)
+}
+
+func couldBeGlob(s string) bool {
+	return strings.ContainsAny(s, "*?[") || strings.Contains(s, `\\`)
+}
+
+// lookupPkgsWithGlob resolves globs in Go package paths to a realized list of
+// Go command paths. It may return a list that contains errors.
+//
+// Precondition: couldBeGlob(pattern) is true
+func lookupPkgsWithGlob(env golang.Environ, wd string, pattern string) ([]*packages.Package, error) {
+	elems := strings.Split(pattern, "/")
+
+	globIndex := 0
+	for i, e := range elems {
+		if couldBeGlob(e) {
+			globIndex = i
+			break
+		}
+	}
+
+	nonGlobPath := strings.Join(append(elems[:globIndex], "..."), "/")
+
+	pkgs, err := lookupPkgNameAndFiles(env, wd, nonGlobPath)
+	if err != nil {
+		return nil, fmt.Errorf("%q is neither package or path/glob -- could not lookup %q (import path globs have to be within modules): %v", pattern, nonGlobPath, err)
+	}
+
+	// Apply the glob.
+	var filteredPkgs []*packages.Package
+	for _, p := range pkgs {
+		if matched, err := path.Match(pattern, p.PkgPath); err != nil {
+			return nil, fmt.Errorf("could not match %q to %q: %v", pattern, p.PkgPath, err)
+		} else if matched {
+			filteredPkgs = append(filteredPkgs, p)
+		}
+	}
+	return filteredPkgs, nil
+}
+
+// lookupCompilablePkgsWithGlob resolves Go package path globs to a realized
+// list of Go command paths. It filters out packages that have no files
+// matching our build constraints and other errors.
+func lookupCompilablePkgsWithGlob(l ulog.Logger, env golang.Environ, wd string, patterns ...string) ([]string, error) {
+	var pkgs []*packages.Package
+	// Batching saves time. Patterns with globs cannot be batched.
+	//
+	// When you batch requests you cannot attribute which result came from
+	// which individual request. For globs, we need to be able to do
+	// path.Match-ing on the results. So no batching of globs.
+	var batchedPatterns []string
+	for _, pattern := range patterns {
+		if couldBeGlob(pattern) {
+			ps, err := lookupPkgsWithGlob(env, wd, pattern)
+			if err != nil {
+				return nil, err
+			}
+			pkgs = append(pkgs, ps...)
+		} else {
+			batchedPatterns = append(batchedPatterns, pattern)
+		}
+	}
+	if len(batchedPatterns) > 0 {
+		ps, err := lookupPkgNameAndFiles(env, wd, batchedPatterns...)
+		if err != nil {
+			return nil, err
+		}
+		pkgs = append(pkgs, ps...)
+	}
+
+	eligiblePkgs, err := checkEligibility(l, pkgs)
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, p := range eligiblePkgs {
+		paths = append(paths, p.PkgPath)
+	}
+	return paths, nil
+}
+
+func filterGoPaths(l ulog.Logger, env golang.Environ, wd string, gopathIncludes, gopathExcludes []string) ([]string, error) {
+	goInc, err := lookupCompilablePkgsWithGlob(l, env, wd, gopathIncludes...)
+	if err != nil {
+		return nil, err
+	}
+
+	goExc, err := lookupCompilablePkgsWithGlob(l, env, wd, gopathExcludes...)
+	if err != nil {
+		return nil, err
+	}
+	return excludePaths(goInc, goExc), nil
+}
+
+var errNoMatch = fmt.Errorf("no Go commands match the given patterns")
+
+// ResolveGlobs takes a list of Go paths and directories that may
+// include globs and returns a valid list of Go commands (either addressed by
+// Go package path or directory path).
+//
+// It returns only directories that have Go files subject to
+// the build constraints in env and logs a "Skipping package {}" statement
+// about packages that are excluded due to build constraints.
+//
+// ResolveGlobs always returns either an absolute file system path and
+// normalized Go package paths. The return list may be mixed.
+//
+// See NewPackages for allowed formats.
+func ResolveGlobs(logger ulog.Logger, env golang.Environ, workingDirectory string, patterns []string) ([]string, error) {
+	var dirIncludes []string
+	var dirExcludes []string
+	var gopathIncludes []string
+	var gopathExcludes []string
+	for _, pattern := range patterns {
+		isExclude := strings.HasPrefix(pattern, "-")
+		if isExclude {
+			pattern = pattern[1:]
+		}
+		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+			if !isExclude {
+				dirIncludes = append(dirIncludes, matches...)
+			} else {
+				dirExcludes = append(dirExcludes, matches...)
+			}
+		} else {
+			if !isExclude {
+				gopathIncludes = append(gopathIncludes, pattern)
+			} else {
+				gopathExcludes = append(gopathExcludes, pattern)
+			}
+		}
+	}
+
+	directories, err := filterDirectoryPaths(logger, env, dirIncludes, dirExcludes)
+	if err != nil {
+		return nil, err
+	}
+
+	gopaths, err := filterGoPaths(logger, env, workingDirectory, gopathIncludes, gopathExcludes)
+	if err != nil {
+		return nil, err
+	}
+
+	result := append(directories, gopaths...)
+	if len(result) == 0 {
+		return nil, errNoMatch
+	}
+	sort.Strings(result)
+	return result, nil
 }
