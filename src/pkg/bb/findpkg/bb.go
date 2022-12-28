@@ -61,7 +61,7 @@ func loadRelative(moduleDir string, pkgDirs []string, loadFunc func(moduleDir st
 	for _, pkgDir := range pkgDirs {
 		relPkgDir, err := filepath.Rel(moduleDir, pkgDir)
 		if err != nil {
-			return fmt.Errorf("Go package path %s is not relative to module %s: %v", pkgDir, moduleDir, err)
+			return fmt.Errorf("Go package path %s is not relative to directory %s: %v", pkgDir, moduleDir, err)
 		}
 
 		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
@@ -320,7 +320,11 @@ func checkEligibility(l ulog.Logger, pkgs []*packages.Package) ([]*packages.Pack
 		if len(p.GoFiles) == 0 && len(p.IgnoredFiles) > 0 {
 			l.Printf("Skipping package %s because build constraints exclude all Go files", p.PkgPath)
 		} else if len(p.Errors) == 0 {
-			goodPkgs = append(goodPkgs, p)
+			if p.Name != "main" {
+				l.Printf("Skipping package %s because it is not a command (must be `package main`)", p.PkgPath)
+			} else {
+				goodPkgs = append(goodPkgs, p)
+			}
 		} else {
 			// We'll definitely return an error in the end, but
 			// we're not returning early because we want to give
@@ -455,7 +459,7 @@ func filterGoPaths(l ulog.Logger, env golang.Environ, wd string, gopathIncludes,
 
 var errNoMatch = fmt.Errorf("no Go commands match the given patterns")
 
-func findDirectoryMatches(env Env, pattern string) []string {
+func findDirectoryMatches(l ulog.Logger, env Env, pattern string) (bool, []string) {
 	prefixes := append([]string{""}, env.GBBPath...)
 
 	// Special sauce for backwards compatibility with old u-root behavior:
@@ -467,26 +471,40 @@ func findDirectoryMatches(env Env, pattern string) []string {
 		pattern = strings.TrimPrefix(pattern, "github.com/u-root/u-root/")
 	}
 
+	// We track matches because we want to ignore individual files.
+	//
+	// Go can look up and compile individual files, which show up as a
+	// package called "command-line-arguments". That does not make sense in
+	// a busybox.
+	//
+	// We don't return an error for convenience of globbing directories
+	// that may have files & directories with commands in them.
+	//
+	// We track the bool so that even if no matches are found for this
+	// pattern, it is not looked up as a Go package path later.
+	foundMatch := false
 	for _, prefix := range prefixes {
 		matches, _ := filepath.Glob(filepath.Join(prefix, pattern))
 		if len(matches) == 0 {
 			continue
 		}
 
+		foundMatch = true
 		var dirs []string
 		for _, match := range matches {
 			fileInfo, _ := os.Stat(match)
 			if !fileInfo.IsDir() {
+				l.Printf("Skipping %s because it is not a directory", match)
 				continue
 			}
 			absPath, _ := filepath.Abs(match)
 			dirs = append(dirs, absPath)
 		}
 		if len(dirs) > 0 {
-			return dirs
+			return true, dirs
 		}
 	}
-	return nil
+	return foundMatch, nil
 }
 
 // Env is configuration for package lookups.
@@ -547,13 +565,13 @@ func ResolveGlobs(logger ulog.Logger, genv golang.Environ, env Env, patterns []s
 		if isExclude {
 			pattern = pattern[1:]
 		}
-		if matches := findDirectoryMatches(env, pattern); len(matches) > 0 {
+		if hasFileMatch, directories := findDirectoryMatches(logger, env, pattern); len(directories) > 0 {
 			if !isExclude {
-				dirIncludes = append(dirIncludes, matches...)
+				dirIncludes = append(dirIncludes, directories...)
 			} else {
-				dirExcludes = append(dirExcludes, matches...)
+				dirExcludes = append(dirExcludes, directories...)
 			}
-		} else {
+		} else if !hasFileMatch {
 			if !isExclude {
 				gopathIncludes = append(gopathIncludes, pattern)
 			} else {

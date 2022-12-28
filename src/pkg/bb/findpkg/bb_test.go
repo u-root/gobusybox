@@ -388,6 +388,13 @@ func TestResolveGlobsGobusyboxGOPATH(t *testing.T) {
 			in:   []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 		},
+		// File system path. Not a directory.
+		{
+			name:    "fspath-not-a-directory",
+			in:      []string{"./bb_test.go"},
+			wantErr: true,
+			err:     errNoMatch,
+		},
 	} {
 		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
