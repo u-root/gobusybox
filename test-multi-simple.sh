@@ -29,8 +29,8 @@ trap ctrl_c INT
 (cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
 
 # Compile gokrazy and p9 together. Got ideas for what to add here? Let me know.
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
-GOARCH=arm64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/\* $TMPDIR/p9/cmd/*
+GOARCH=arm64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/\* $TMPDIR/p9/cmd/*
 
 if grep -q -v "go1.13" <<< "$($GO version)"; then
   GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*

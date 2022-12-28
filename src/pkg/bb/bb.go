@@ -160,7 +160,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	pkgDir := filepath.Join(tmpDir, "src")
 
 	// Ask go about all the commands in one batch for dependency caching.
-	cmds, err := findpkg.NewPackages(l, opts.Env, opts.CommandPaths...)
+	cmds, err := findpkg.NewBBPackages(l, opts.Env, opts.CommandPaths...)
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}
