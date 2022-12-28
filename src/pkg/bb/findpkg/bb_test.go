@@ -376,6 +376,18 @@ func TestResolveGlobsGobusyboxGOPATH(t *testing.T) {
 				filepath.Join(urootSrc, "cmds/core/yes"),
 			},
 		},
+		{
+			name: "fspath-nomodule",
+			envs: []golang.Environ{moduleOffEnv},
+			in:   []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
+			want: []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
+		},
+		{
+			name: "pkgpath-nomodule",
+			envs: []golang.Environ{moduleOffEnv},
+			in:   []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
+			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
+		},
 	} {
 		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
