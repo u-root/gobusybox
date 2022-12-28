@@ -49,6 +49,30 @@ func modules(filesystemPaths []string) (map[string][]string, []string) {
 	return moduledPackages, noModulePkgs
 }
 
+func loadRelative(moduleDir string, pkgDirs []string, loadFunc func(moduleDir string, dirs []string) error) error {
+	// Make all paths relative, because packages.Load/`go list -json` does
+	// not like absolute paths when what's being looked up is outside of
+	// GOPATH. It's fine though when those paths are relative to the PWD.
+	// Don't ask me why...
+	//
+	// E.g.
+	// * package $HOME/u-root/cmds/core/ip: -: import "$HOME/u-root/cmds/core/ip": cannot import absolute path
+	var relPkgDirs []string
+	for _, pkgDir := range pkgDirs {
+		relPkgDir, err := filepath.Rel(moduleDir, pkgDir)
+		if err != nil {
+			return fmt.Errorf("Go package path %s is not relative to module %s: %v", pkgDir, moduleDir, err)
+		}
+
+		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
+		//
+		// The former looks for cmd/foo in $GOROOT or $GOPATH, while
+		// the latter looks in the relative directory ./cmd/foo.
+		relPkgDirs = append(relPkgDirs, "./"+relPkgDir)
+	}
+	return loadFunc(moduleDir, relPkgDirs)
+}
+
 // Find each packages' module, and batch package queries together by module.
 //
 // Query all packages that don't have a module at all together, as well.
@@ -59,13 +83,13 @@ func batchFSPackages(l ulog.Logger, absPaths []string, loadFunc func(moduleDir s
 	mods, noModulePkgDirs := modules(absPaths)
 
 	for moduleDir, pkgDirs := range mods {
-		if err := loadFunc(moduleDir, pkgDirs); err != nil {
+		if err := loadRelative(moduleDir, pkgDirs, loadFunc); err != nil {
 			return err
 		}
 	}
 
 	if len(noModulePkgDirs) > 0 {
-		if err := loadFunc(noModulePkgDirs[0], noModulePkgDirs); err != nil {
+		if err := loadRelative(noModulePkgDirs[0], noModulePkgDirs, loadFunc); err != nil {
 			return err
 		}
 	}
@@ -91,7 +115,7 @@ func batchLoadFSPackages(l ulog.Logger, env golang.Environ, absPaths []string) (
 	var allps []*packages.Package
 
 	err := batchFSPackages(l, absPaths, func(moduleDir string, packageDirs []string) error {
-		pkgs, err := loadFSPkgs(l, env, moduleDir, packageDirs...)
+		pkgs, err := loadPkgs(env, moduleDir, packageDirs...)
 		if err != nil {
 			return fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
 		}
@@ -136,24 +160,45 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 //
 // Allowed formats for names:
 //
-//   - relative and absolute paths including globs following Go's filepath.Match format.
+//   - relative and absolute paths including globs following Go's
+//     filepath.Match format.
+//
 //   - Go package paths; e.g. github.com/u-root/u-root/cmds/core/ls
-//   - Globs of Go package paths, e.g github.com/u-root/u-root/cmds/i* (using path.Match format).
-//   - Go package path expansions with ..., e.g. github.com/u-root/u-root/cmds/core/...
 //
-// If an entry starts with "-", it excludes the matching package(s).
+//   - Globs of Go package paths, e.g github.com/u-root/u-root/cmds/i* (using
+//     path.Match format).
 //
-// Examples:
+//   - Go package path expansions with ..., e.g.
+//     github.com/u-root/u-root/cmds/core/...
 //
-//	./foobar
-//	./foobar/glob*
-//	github.com/u-root/u-root/cmds/core/...
-//	github.com/u-root/u-root/cmds/core/ip
-//	github.com/u-root/u-root/cmds/core/g*lob
+//   - file system paths (with globs in filepath.Match format) relative to
+//     GBB_PATH, e.g. cmds/core/ls if GBB_PATH contains $HOME/u-root.
+//
+//   - backwards compatibility: UROOT_SOURCE is a GBB_PATH, and patterns that
+//     begin with github.com/u-root/u-root/ will attempt to use UROOT_SOURCE
+//     first to find Go commands within.
+//
+// If a pattern starts with "-", it excludes the matching package(s).
 //
 // Globs of Go package paths must be within module boundaries to give accurate
 // results, i.e. a glob that spans 2 Go modules may give unpredictable results.
-func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, names ...string) ([]*packages.Package, error) {
+//
+// Examples of valid inputs:
+//
+//   - ./foobar
+//
+//   - ./foobar/glob*
+//
+//   - github.com/u-root/u-root/cmds/core/...
+//
+//   - github.com/u-root/u-root/cmds/core/ip
+//
+//   - github.com/u-root/u-root/cmds/core/g*lob
+//
+//   - GBB_PATH=$HOME/u-root:$HOME/yourproject cmds/core/* cmd/foobar
+//
+//   - UROOT_SOURCE=$HOME/u-root github.com/u-root/u-root/cmds/core/ip
+func NewPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string) ([]*packages.Package, error) {
 	var goImportPaths []string
 	var filesystemPaths []string
 
@@ -167,7 +212,7 @@ func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, nam
 	//    do type-checking, etc.)
 
 	// Step 1.
-	paths, err := ResolveGlobs(l, env, workingDirectory, names)
+	paths, err := ResolveGlobs(l, genv, env, patterns)
 	if err != nil {
 		return nil, err
 	}
@@ -185,7 +230,7 @@ func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, nam
 
 	var ps []*packages.Package
 	if len(goImportPaths) > 0 {
-		importPkgs, err := loadPkgs(env, workingDirectory, goImportPaths...)
+		importPkgs, err := loadPkgs(genv, env.WorkingDirectory, goImportPaths...)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
 		}
@@ -197,7 +242,7 @@ func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, nam
 		}
 	}
 
-	pkgs, err := batchLoadFSPackages(l, env, filesystemPaths)
+	pkgs, err := batchLoadFSPackages(l, genv, filesystemPaths)
 	if err != nil {
 		return nil, fmt.Errorf("could not load packages from file system: %v", err)
 	}
@@ -207,8 +252,8 @@ func NewPackages(l ulog.Logger, env golang.Environ, workingDirectory string, nam
 
 // NewBBPackages collects package metadata about all named packages. See
 // NewPackages for documentation on the names argument.
-func NewBBPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbinternal.Package, error) {
-	ps, err := NewPackages(l, env, "", names...)
+func NewBBPackages(l ulog.Logger, genv golang.Environ, env Env, names ...string) ([]*bbinternal.Package, error) {
+	ps, err := NewPackages(l, genv, env, names...)
 	if err != nil {
 		return nil, err
 	}
@@ -220,30 +265,6 @@ func NewBBPackages(l ulog.Logger, env golang.Environ, names ...string) ([]*bbint
 	return ips, nil
 }
 
-// loadFSPkgs looks up importDirs packages, making the import path relative to
-// `dir`. `go list -json` requires the import path to be relative to the dir
-// when the package is outside of a $GOPATH and there is no go.mod in any parent directory.
-func loadFSPkgs(l ulog.Logger, env golang.Environ, dir string, importDirs ...string) ([]*packages.Package, error) {
-	// Make all paths relative, because packages.Load/`go list -json` does
-	// not like absolute paths sometimes.
-	//
-	// N.B.(hugelgupf): I don't remember why this is here.
-	var relImportDirs []string
-	for _, importDir := range importDirs {
-		relImportDir, err := filepath.Rel(dir, importDir)
-		if err != nil {
-			return nil, fmt.Errorf("Go package path %s is not relative to %s: %v", importDir, dir, err)
-		}
-
-		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
-		//
-		// The former looks for cmd/foo in $GOROOT or $GOPATH, while
-		// the latter looks in the relative directory ./cmd/foo.
-		relImportDirs = append(relImportDirs, "./"+relImportDir)
-	}
-	return loadPkgs(env, dir, relImportDirs...)
-}
-
 func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode: packages.NeedName | packages.NeedImports | packages.NeedFiles | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedCompiledGoFiles | packages.NeedModule | packages.NeedEmbedFiles,
@@ -253,25 +274,7 @@ func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.P
 	return packages.Load(cfg, patterns...)
 }
 
-func filterDirectoryPaths(l ulog.Logger, env golang.Environ, includes []string, excludes []string) ([]string, error) {
-	var directories []string
-	for _, match := range includes {
-		// Skip anything that is not a directory, as only directories can be packages.
-		fileInfo, _ := os.Stat(match)
-		if !fileInfo.IsDir() {
-			continue
-		}
-		absPath, _ := filepath.Abs(match)
-
-		directories = append(directories, absPath)
-	}
-
-	// Exclusion doesn't have to go through the eligibility check.
-	for i, e := range excludes {
-		absPath, _ := filepath.Abs(e)
-		excludes[i] = absPath
-	}
-
+func filterDirectoryPaths(l ulog.Logger, env golang.Environ, directories []string, excludes []string) ([]string, error) {
 	// Eligibility check: does each directory contain files that are
 	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
 	// tags?
@@ -452,6 +455,76 @@ func filterGoPaths(l ulog.Logger, env golang.Environ, wd string, gopathIncludes,
 
 var errNoMatch = fmt.Errorf("no Go commands match the given patterns")
 
+func findDirectoryMatches(env Env, pattern string) []string {
+	prefixes := append([]string{""}, env.GBBPath...)
+
+	// Special sauce for backwards compatibility with old u-root behavior:
+	// if urootSource is set, try to catch Go package paths and convert
+	// them to file system lookups.
+	if len(env.URootSource) > 0 {
+		// Prefer urootSource to gbbPaths in this case.
+		prefixes = append([]string{"", env.URootSource}, env.GBBPath...)
+		pattern = strings.TrimPrefix(pattern, "github.com/u-root/u-root/")
+	}
+
+	for _, prefix := range prefixes {
+		matches, _ := filepath.Glob(filepath.Join(prefix, pattern))
+		if len(matches) == 0 {
+			continue
+		}
+
+		var dirs []string
+		for _, match := range matches {
+			fileInfo, _ := os.Stat(match)
+			if !fileInfo.IsDir() {
+				continue
+			}
+			absPath, _ := filepath.Abs(match)
+			dirs = append(dirs, absPath)
+		}
+		if len(dirs) > 0 {
+			return dirs
+		}
+	}
+	return nil
+}
+
+// Env is configuration for package lookups.
+type Env struct {
+	// GBBPath provides directories in which to look for Go commands.
+	//
+	// The default is to use a colon-separated list from the env var
+	// GBB_PATH.
+	GBBPath []string
+
+	// URootSource is a special GBBPath. It's a directory that will be used
+	// to look for u-root commands. If a u-root command is given as a
+	// pattern with the "github.com/u-root/u-root/" Go package path prefix,
+	// URootSource will be used to find the command source.
+	//
+	// The default is to use UROOT_SOURCE env var.
+	URootSource string
+
+	// WorkingDirectory is the directory used for module-enabled `go list`
+	// lookups. The go.mod in this directory (or one of its parents) is
+	// used to resolve Go package paths.
+	WorkingDirectory string
+}
+
+func (e Env) String() string {
+	return fmt.Sprintf("GBB_PATH=%s UROOT_SOURCE=%s PWD=%s", strings.Join(e.GBBPath, ":"), e.URootSource, e.WorkingDirectory)
+}
+
+// DefaultEnv is the default environment derived from environment variables and
+// the current working directory.
+func DefaultEnv() Env {
+	return Env{
+		GBBPath:          strings.Split(os.Getenv("GBB_PATH"), ":"),
+		URootSource:      os.Getenv("UROOT_SOURCE"),
+		WorkingDirectory: "",
+	}
+}
+
 // ResolveGlobs takes a list of Go paths and directories that may
 // include globs and returns a valid list of Go commands (either addressed by
 // Go package path or directory path).
@@ -464,7 +537,7 @@ var errNoMatch = fmt.Errorf("no Go commands match the given patterns")
 // normalized Go package paths. The return list may be mixed.
 //
 // See NewPackages for allowed formats.
-func ResolveGlobs(logger ulog.Logger, env golang.Environ, workingDirectory string, patterns []string) ([]string, error) {
+func ResolveGlobs(logger ulog.Logger, genv golang.Environ, env Env, patterns []string) ([]string, error) {
 	var dirIncludes []string
 	var dirExcludes []string
 	var gopathIncludes []string
@@ -474,7 +547,7 @@ func ResolveGlobs(logger ulog.Logger, env golang.Environ, workingDirectory strin
 		if isExclude {
 			pattern = pattern[1:]
 		}
-		if matches, _ := filepath.Glob(pattern); len(matches) > 0 {
+		if matches := findDirectoryMatches(env, pattern); len(matches) > 0 {
 			if !isExclude {
 				dirIncludes = append(dirIncludes, matches...)
 			} else {
@@ -489,12 +562,12 @@ func ResolveGlobs(logger ulog.Logger, env golang.Environ, workingDirectory strin
 		}
 	}
 
-	directories, err := filterDirectoryPaths(logger, env, dirIncludes, dirExcludes)
+	directories, err := filterDirectoryPaths(logger, genv, dirIncludes, dirExcludes)
 	if err != nil {
 		return nil, err
 	}
 
-	gopaths, err := filterGoPaths(logger, env, workingDirectory, gopathIncludes, gopathExcludes)
+	gopaths, err := filterGoPaths(logger, genv, env.WorkingDirectory, gopathIncludes, gopathExcludes)
 	if err != nil {
 		return nil, err
 	}
