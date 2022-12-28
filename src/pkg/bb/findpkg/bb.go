@@ -215,9 +215,9 @@ func NewPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string
 
 	// Step 2.
 	for _, name := range paths {
-		if strings.HasPrefix(name, ".") || strings.HasPrefix(name, "/") {
-			filesystemPaths = append(filesystemPaths, name)
-		} else if _, err := os.Stat(name); err == nil {
+		// ResolveGlobs returns either an absolute file system path or
+		// a Go import path.
+		if strings.HasPrefix(name, "/") {
 			filesystemPaths = append(filesystemPaths, name)
 		} else {
 			goImportPaths = append(goImportPaths, name)
