@@ -140,11 +140,7 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 			merr = multierror.Append(merr, e)
 		}
 		return plist, fmt.Errorf("failed to add package %v for errors: %v", p, merr)
-	} else if len(p.GoFiles) == 0 {
-		l.Printf("Skipping package %v because it has no Go files", p)
-	} else if p.Name != "main" {
-		l.Printf("Skipping package %v because it is not a command (must be `package main`)", p)
-	} else {
+	} else if len(p.GoFiles) > 0 {
 		plist = append(plist, p)
 	}
 	return plist, nil
