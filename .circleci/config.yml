@@ -83,6 +83,17 @@ templates:
           name: gobuilds-gopath
           command: ./gobuilds-gopath.sh
 
+  test-template: &test-template
+    steps:
+      - checkout
+      - run:
+          name: go env
+          command: go env
+      - run:
+          name: test
+          command: ./gotest.sh
+
+
 workflows:
   version: 2
   build:
@@ -111,6 +122,26 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - test-go116:
+          requires:
+            - clean-makebb
+            - clean-gopath
+            - clean-gomod
+      - test-go117:
+          requires:
+            - clean-makebb
+            - clean-gopath
+            - clean-gomod
+      - test-go118:
+          requires:
+            - clean-makebb
+            - clean-gopath
+            - clean-gomod
+      - test-go119:
+          requires:
+            - clean-makebb
+            - clean-gopath
+            - clean-gomod
       - build-gomod-go115:
           requires:
             - clean-makebb
@@ -166,6 +197,10 @@ workflows:
       - build-gopath-go117
       - build-gopath-go118
       - build-gopath-go119
+      - test-go116
+      - test-go117
+      - test-go118
+      - test-go119
       - build-gomod-go115
       - build-gomod-go116
       - build-gomod-go117
@@ -247,6 +282,18 @@ jobs:
 
   build-gopath-go119:
     <<: [*go119-template, *gopath-template, *build-gopath-template]
+
+  test-go116:
+    <<: [*go116-template, *gopath-template, *test-template]
+
+  test-go117:
+    <<: [*go117-template, *gopath-template, *test-template]
+
+  test-go118:
+    <<: [*go118-template, *gopath-template, *test-template]
+
+  test-go119:
+    <<: [*go119-template, *gopath-template, *test-template]
 
   clean-gomod:
     <<: [*go119-template, *gomod-template]
