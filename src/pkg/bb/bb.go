@@ -173,7 +173,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	}
 
 	// Ask go about all the commands in one batch for dependency caching.
-	cmds, err := findpkg.NewBBPackages(l, opts.Env, lookupEnv, opts.CommandPaths...)
+	cmds, err := findpkg.NewPackages(l, opts.Env, lookupEnv, opts.CommandPaths...)
 	if err != nil {
 		return fmt.Errorf("finding packages failed: %v", err)
 	}

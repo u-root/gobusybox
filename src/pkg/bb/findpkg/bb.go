@@ -146,55 +146,7 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 	return plist, nil
 }
 
-// NewPackages collects package metadata about all named packages.
-//
-// names can either be directory paths or Go import paths, with globs.
-//
-// It skips directories that do not have Go files subject to the build
-// constraints in env and logs a "Skipping package {}" statement about such
-// directories/packages.
-//
-// Allowed formats for names:
-//
-//   - relative and absolute paths including globs following Go's
-//     filepath.Match format.
-//
-//   - Go package paths; e.g. github.com/u-root/u-root/cmds/core/ls
-//
-//   - Globs of Go package paths, e.g github.com/u-root/u-root/cmds/i* (using
-//     path.Match format).
-//
-//   - Go package path expansions with ..., e.g.
-//     github.com/u-root/u-root/cmds/core/...
-//
-//   - file system paths (with globs in filepath.Match format) relative to
-//     GBB_PATH, e.g. cmds/core/ls if GBB_PATH contains $HOME/u-root.
-//
-//   - backwards compatibility: UROOT_SOURCE is a GBB_PATH, and patterns that
-//     begin with github.com/u-root/u-root/ will attempt to use UROOT_SOURCE
-//     first to find Go commands within.
-//
-// If a pattern starts with "-", it excludes the matching package(s).
-//
-// Globs of Go package paths must be within module boundaries to give accurate
-// results, i.e. a glob that spans 2 Go modules may give unpredictable results.
-//
-// Examples of valid inputs:
-//
-//   - ./foobar
-//
-//   - ./foobar/glob*
-//
-//   - github.com/u-root/u-root/cmds/core/...
-//
-//   - github.com/u-root/u-root/cmds/core/ip
-//
-//   - github.com/u-root/u-root/cmds/core/g*lob
-//
-//   - GBB_PATH=$HOME/u-root:$HOME/yourproject cmds/core/* cmd/foobar
-//
-//   - UROOT_SOURCE=$HOME/u-root github.com/u-root/u-root/cmds/core/ip
-func NewPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string) ([]*packages.Package, error) {
+func newPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string) ([]*packages.Package, error) {
 	var goImportPaths []string
 	var filesystemPaths []string
 
@@ -246,10 +198,56 @@ func NewPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string
 	return ps, nil
 }
 
-// NewBBPackages collects package metadata about all named packages. See
-// NewPackages for documentation on the names argument.
-func NewBBPackages(l ulog.Logger, genv golang.Environ, env Env, names ...string) ([]*bbinternal.Package, error) {
-	ps, err := NewPackages(l, genv, env, names...)
+// NewPackages collects package metadata about all named packages.
+//
+// names can either be directory paths or Go import paths, with globs.
+//
+// It skips directories that do not have Go files subject to the build
+// constraints in env and logs a "Skipping package {}" statement about such
+// directories/packages.
+//
+// Allowed formats for names:
+//
+//   - relative and absolute paths including globs following Go's
+//     filepath.Match format.
+//
+//   - Go package paths; e.g. github.com/u-root/u-root/cmds/core/ls
+//
+//   - Globs of Go package paths, e.g github.com/u-root/u-root/cmds/i* (using
+//     path.Match format).
+//
+//   - Go package path expansions with ..., e.g.
+//     github.com/u-root/u-root/cmds/core/...
+//
+//   - file system paths (with globs in filepath.Match format) relative to
+//     GBB_PATH, e.g. cmds/core/ls if GBB_PATH contains $HOME/u-root.
+//
+//   - backwards compatibility: UROOT_SOURCE is a GBB_PATH, and patterns that
+//     begin with github.com/u-root/u-root/ will attempt to use UROOT_SOURCE
+//     first to find Go commands within.
+//
+// If a pattern starts with "-", it excludes the matching package(s).
+//
+// Globs of Go package paths must be within module boundaries to give accurate
+// results, i.e. a glob that spans 2 Go modules may give unpredictable results.
+//
+// Examples of valid inputs:
+//
+//   - ./foobar
+//
+//   - ./foobar/glob*
+//
+//   - github.com/u-root/u-root/cmds/core/...
+//
+//   - github.com/u-root/u-root/cmds/core/ip
+//
+//   - github.com/u-root/u-root/cmds/core/g*lob
+//
+//   - GBB_PATH=$HOME/u-root:$HOME/yourproject cmds/core/* cmd/foobar
+//
+//   - UROOT_SOURCE=$HOME/u-root github.com/u-root/u-root/cmds/core/ip
+func NewPackages(l ulog.Logger, genv golang.Environ, env Env, names ...string) ([]*bbinternal.Package, error) {
+	ps, err := newPackages(l, genv, env, names...)
 	if err != nil {
 		return nil, err
 	}
