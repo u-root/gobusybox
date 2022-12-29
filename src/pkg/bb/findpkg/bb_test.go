@@ -127,11 +127,22 @@ func TestResolve(t *testing.T) {
 	moduleOnEnv := golang.Default()
 	moduleOnEnv.GO111MODULE = "on"
 
-	if err := os.Mkdir("./test/broken", 0777); err != nil {
+	noGoToolEnv := golang.Default()
+	noGoToolEnv.GOROOT = t.TempDir()
+
+	if err := os.Mkdir("./test/resolvebroken", 0777); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll("./test/broken")
-	if err := ioutil.WriteFile("./test/broken/main.go", []byte("broken"), 0777); err != nil {
+	defer os.RemoveAll("./test/resolvebroken")
+	if err := ioutil.WriteFile("./test/resolvebroken/main.go", []byte("broken"), 0777); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.Mkdir("./test/parsebroken", 0777); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll("./test/parsebroken")
+	if err := ioutil.WriteFile("./test/parsebroken/main.go", []byte("package main\n\nimport \"fmt\""), 0777); err != nil {
 		t.Fatal(err)
 	}
 
@@ -272,12 +283,12 @@ func TestResolve(t *testing.T) {
 		},
 		{
 			name:    "fspath-broken-go",
-			in:      []string{"./test/broken"},
+			in:      []string{"./test/resolvebroken"},
 			wantErr: true,
 		},
 		{
 			name:    "pkgpath-broken-go",
-			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/broken"},
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/resolvebroken"},
 			wantErr: true,
 		},
 		{
@@ -409,6 +420,25 @@ func TestResolve(t *testing.T) {
 			wantErr: true,
 			err:     errNoMatch,
 		},
+		// Some error cases where $GOROOT/bin/go is unavailable, so packages.Load fails.
+		{
+			name:    "fspath-load-fails",
+			envs:    []golang.Environ{noGoToolEnv},
+			in:      []string{"./test/goglob/*"},
+			wantErr: true,
+		},
+		{
+			name:    "pkgpath-batched-load-fails",
+			envs:    []golang.Environ{noGoToolEnv},
+			in:      []string{"./test/goglob/..."},
+			wantErr: true,
+		},
+		{
+			name:    "pkgpath-glob-load-fails",
+			envs:    []golang.Environ{noGoToolEnv},
+			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/*"},
+			wantErr: true,
+		},
 	}
 
 	urootTestCases := []testCase{
@@ -506,6 +536,14 @@ func TestResolve(t *testing.T) {
 			"cmds/core/ip",
 			"github.com/u-root/u-root/cmds/core/dhclient",
 		},
+		wantErr: true,
+	}, testCase{
+		name:    "fspath-parse-broken",
+		in:      []string{"./test/parsebroken"},
+		wantErr: true,
+	}, testCase{
+		name:    "pkgpath-parse-broken",
+		in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/parsebroken"},
 		wantErr: true,
 	})
 	newPkgTests = append(newPkgTests, testCasesWithEnv([]golang.Environ{moduleOnEnv}, urootTestCases...)...)
