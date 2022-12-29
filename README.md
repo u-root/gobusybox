@@ -1,4 +1,4 @@
-## Go Busybox
+# Go Busybox
 
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src)
 [![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/main)
@@ -67,12 +67,12 @@ makebb ./p9/cmd/* ./gokrazy/cmd/*
 For the moment, `makebb` is tested with repositories on the local file system.
 Using Go import paths is supported, as well, but not as well-tested.
 
-### Path resolution
+## Path resolution
 
 `makebb` and the APIs mentioned below all accept commands from file system
 paths, Go package paths, and globs matching path.Match thereof.
 
-#### makebb with file system paths/globs and `GBB_PATH`
+### makebb with file system paths/globs and `GBB_PATH`
 
 File system paths and globs:
 
@@ -103,7 +103,7 @@ GBB_PATH=$HOME/u-root:$HOME/u-bmc makebb \
 #   $HOME/u-bmc/cmd/socreset
 ```
 
-#### makebb with Go package paths
+### makebb with Go package paths
 
 For Go package paths to be usable, the path passed to `makebb` must be in the
 go.mod of the working directory. This is mostly useful for repositories making
@@ -153,13 +153,13 @@ makebb \
   github.com/hugelgupf/p9/cmd/p9ufs
 ```
 
-### APIs
+## APIs
 
 Besides the makebb CLI command, there is a
 [Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb)
 and bazel rules in [src/gobb2.bzl](src/gobb2.bzl).
 
-#### Using bazel go_busybox rule
+### Using bazel go_busybox rule
 
 Assuming you have [rules_go](https://github.com/bazelbuild/rules_go) set up, add
 the following to your `WORKSPACE`:
@@ -200,7 +200,7 @@ go_busybox(
 For the moment, the targets listed on `cmds` must be **individual, absolute
 labels** (issue [#38](https://github.com/u-root/gobusybox/issues/38)).
 
-### Shortcomings
+## Shortcomings
 
 -   Any *imported* packages' `init` functions are run for *every* command.
 
