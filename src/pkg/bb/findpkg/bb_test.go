@@ -569,7 +569,7 @@ func TestResolve(t *testing.T) {
 
 				var pkgPaths []string
 				for _, p := range out {
-					pkgPaths = append(pkgPaths, p.PkgPath)
+					pkgPaths = append(pkgPaths, p.Pkg.PkgPath)
 				}
 				sort.Strings(pkgPaths)
 				if !reflect.DeepEqual(pkgPaths, tc.wantPkgPath) {
