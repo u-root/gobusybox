@@ -532,8 +532,14 @@ func (e Env) String() string {
 // DefaultEnv is the default environment derived from environment variables and
 // the current working directory.
 func DefaultEnv() Env {
+	gbbPath := os.Getenv("GBB_PATH")
+	// strings.Split("", ":") is []string{""}, but we want nil
+	var gbbPaths []string
+	if gbbPath != "" {
+		gbbPaths = strings.Split(gbbPath, ":")
+	}
 	return Env{
-		GBBPath:          strings.Split(os.Getenv("GBB_PATH"), ":"),
+		GBBPath:          gbbPaths,
 		URootSource:      os.Getenv("UROOT_SOURCE"),
 		WorkingDirectory: "",
 	}

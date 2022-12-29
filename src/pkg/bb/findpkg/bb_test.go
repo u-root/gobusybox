@@ -590,3 +590,45 @@ func testCasesWithEnv(envs []golang.Environ, tcs ...testCase) []testCase {
 	}
 	return newTCs
 }
+
+func TestDefaultEnv(t *testing.T) {
+	for _, tc := range []struct {
+		GBB_PATH     string
+		UROOT_SOURCE string
+		s            string
+		want         Env
+	}{
+		{
+			GBB_PATH:     "foo:bar",
+			UROOT_SOURCE: "./foo",
+			s:            "GBB_PATH=foo:bar UROOT_SOURCE=./foo PWD=",
+			want: Env{
+				GBBPath:     []string{"foo", "bar"},
+				URootSource: "./foo",
+			},
+		},
+		{
+			GBB_PATH: "foo",
+			s:        "GBB_PATH=foo UROOT_SOURCE= PWD=",
+			want: Env{
+				GBBPath: []string{"foo"},
+			},
+		},
+		{
+			s:    "GBB_PATH= UROOT_SOURCE= PWD=",
+			want: Env{},
+		},
+	} {
+		t.Run(tc.s, func(t *testing.T) {
+			os.Setenv("GBB_PATH", tc.GBB_PATH)
+			os.Setenv("UROOT_SOURCE", tc.UROOT_SOURCE)
+			e := DefaultEnv()
+			if !reflect.DeepEqual(e, tc.want) {
+				t.Errorf("Env = %#v, want %#v", e, tc.want)
+			}
+			if e.String() != tc.s {
+				t.Errorf("Env.String() = %v, want %v", e, tc.s)
+			}
+		})
+	}
+}
