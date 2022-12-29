@@ -386,17 +386,19 @@ func TestResolve(t *testing.T) {
 			in: []string{
 				"github.com/u-root/u-root/cmds/core/init",
 				"github.com/u-root/u-root/cmds/core/ip",
-				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/u-root/u-root/cmds/core/yes",
 				"github.com/hugelgupf/p9/cmd/p9ufs",
-				"-github.com/u-root/u-root/cmds/core/i*",
+				"-github.com/u-root/u-root/cmds/core/y*",
 			},
 			want: []string{
 				"github.com/hugelgupf/p9/cmd/p9ufs",
-				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/u-root/u-root/cmds/core/init",
+				"github.com/u-root/u-root/cmds/core/ip",
 			},
 			wantPkgPath: []string{
 				"github.com/hugelgupf/p9/cmd/p9ufs",
-				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/u-root/u-root/cmds/core/init",
+				"github.com/u-root/u-root/cmds/core/ip",
 			},
 		},
 		{
