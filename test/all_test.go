@@ -26,6 +26,10 @@ func skipIfUnsupported(t *testing.T, goVersion string, unsupportedGoVersions []s
 }
 
 func TestMakeBB(t *testing.T) {
+	if *makebb == "" {
+		t.Fatalf("Path to makebb is not set")
+	}
+
 	goVersion, err := golang.Default().Version()
 	if err != nil {
 		t.Fatalf("Could not determine Go version: %v", err)
@@ -35,6 +39,8 @@ func TestMakeBB(t *testing.T) {
 		testname string
 		// file paths to commands to compile
 		cmds []string
+		// extra args to makebb
+		extraArgs []string
 		// command name -> expected output
 		want map[string]string
 		// Go versions for which this test should be skipped.
@@ -44,12 +50,18 @@ func TestMakeBB(t *testing.T) {
 			testname:              "goembed",
 			cmds:                  []string{"./goembed"},
 			want:                  map[string]string{"goembed": "hello\n"},
-			unsupportedGoVersions: []string{"go1.13", "go1.14", "go1.15"},
+			unsupportedGoVersions: []string{"go1.15"},
 		},
 		{
 			testname: "12-fancy-cmd",
 			cmds:     []string{"./12-fancy-cmd"},
 			want:     map[string]string{"12-fancy-cmd": "12-fancy-cmd\n"},
+		},
+		{
+			testname:  "injectldvar",
+			cmds:      []string{"./injectldvar"},
+			extraArgs: []string{"-go-extra-args=-ldflags", "-go-extra-args=-X 'github.com/u-root/gobusybox/test/injectldvar.Something=Hello World'"},
+			want:      map[string]string{"injectldvar": "Hello World\n"},
 		},
 		{
 			testname: "implicitimport",
@@ -98,8 +110,9 @@ func TestMakeBB(t *testing.T) {
 					binary := filepath.Join(dir, fmt.Sprintf("bb-%s", go111module))
 
 					// Build the bb.
-					t.Logf("Run: %s %s -o %s %s", goEnv, *makebb, binary, strings.Join(tt.cmds, " "))
-					cmd := exec.Command(*makebb, append([]string{"-o", binary}, tt.cmds...)...)
+					t.Logf("Run: %s %s -o %s %v %s", goEnv, *makebb, binary, strings.Join(tt.extraArgs, " "), strings.Join(tt.cmds, " "))
+					args := append([]string{"-o", binary}, tt.extraArgs...)
+					cmd := exec.Command(*makebb, append(args, tt.cmds...)...)
 					cmd.Env = append(os.Environ(), goEnv)
 					out, err := cmd.CombinedOutput()
 					if err != nil {
