@@ -67,6 +67,92 @@ makebb ./p9/cmd/* ./gokrazy/cmd/*
 For the moment, `makebb` is tested with repositories on the local file system.
 Using Go import paths is supported, as well, but not as well-tested.
 
+### Path resolution
+
+`makebb` and the APIs mentioned below all accept commands from file system
+paths, Go package paths, and globs matching path.Match thereof.
+
+#### makebb with file system paths/globs and `GBB_PATH`
+
+File system paths and globs:
+
+```sh
+git clone https://github.com/u-root/u-root
+
+makebb ./u-root/cmds/core/ip ./u-root/cmds/core/init
+
+# Escaping the * to show that the Go APIs know how to resolve this as well
+makebb ./u-root/cmds/core/\*
+makebb ./u-root/cmds/core/i\* ./u-root/cmds/boot/pxeboot
+```
+
+For a shortcut to specify many commands sharing common path elements (e.g. from
+the same repository), the `GBB_PATH` environment variable exists. Paths are
+concatenated with every colon-separated element of `GBB_PATH` from left to right
+and checked for existence.
+
+```shell
+GBB_PATH=$HOME/u-root:$HOME/u-bmc makebb \
+    cmds/core/init \
+    cmds/core/elvish \
+    cmd/socreset
+
+# matches:
+#   $HOME/u-root/cmds/core/init
+#   $HOME/u-root/cmds/core/elvish
+#   $HOME/u-bmc/cmd/socreset
+```
+
+#### makebb with Go package paths
+
+For Go package paths to be usable, the path passed to `makebb` must be in the
+go.mod of the working directory. This is mostly useful for repositories making
+programmatic use of u-root's APIs.
+
+```sh
+cd ./u-root
+
+# In u-root's directory itself, github.com/u-root/u-root is resolvable.
+makebb github.com/u-root/u-root/cmds/core/...
+makebb github.com/u-root/u-root/cmds/core/*
+makebb github.com/u-root/u-root/cmds/core/i*
+```
+
+To depend on commands outside of ones own repository, the easiest way to depend
+on Go commands is the following:
+
+```sh
+TMPDIR=$(mktemp -d)
+cd $TMPDIR
+go mod init foobar
+```
+
+Create a file with some unused build tag like this to create dependencies on commands:
+
+```go
+//go:build tools
+
+package something
+
+import (
+        "github.com/u-root/u-root/cmds/core/ip"
+        "github.com/u-root/u-root/cmds/core/init"
+        "github.com/hugelgupf/p9/cmd/p9ufs"
+)
+```
+
+The unused build tag keeps it from being compiled, but its existence forces `go
+mod` to add these dependencies to `go.mod`:
+
+```sh
+go mod tidy
+
+makebb \
+  github.com/u-root/u-root/cmds/core/ip \
+  github.com/u-root/u-root/cmds/core/init \
+  github.com/hugelgupf/p9/cmd/p9ufs
+```
+
 ### APIs
 
 Besides the makebb CLI command, there is a
