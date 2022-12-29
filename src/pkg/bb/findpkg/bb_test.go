@@ -301,39 +301,6 @@ func TestResolve(t *testing.T) {
 			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/*"},
 			wantErr: true,
 		},
-		// Finding packages in more than 1 module, file system paths.
-		{
-			name: "fspath-multi-module",
-			in: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			want: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/gobusybox/src/cmd/makebb",
-				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
-			},
-		},
-		// Finding packages in more than 1 module, file system paths, GBB_PATHS support.
-		{
-			name:    "fspath-gbbpath-multi-module",
-			gbbPath: []string{gbbmod, gbbroot},
-			in: []string{
-				"cmd/makebb",
-				"test/normaldeps/mod1/cmd/getppid",
-			},
-			want: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/gobusybox/src/cmd/makebb",
-				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
-			},
-		},
 		// Multi module resolution, package path. (GO111MODULE=on only)
 		//
 		// Unless we put u-root and p9 in GOPATH in the local version
@@ -443,7 +410,11 @@ func TestResolve(t *testing.T) {
 		},
 	}
 
-	urootTestCases := []testCase{
+	// test cases that depend on external repositories.
+	//
+	// For NewPackages, these are only run with GO111MODULE=on so we don't
+	// have to get all the deps and put them in GOPATH for this test.
+	externalDepCases := []testCase{
 		// GBB_PATHS, file system paths, non-Gobusybox module.
 		{
 			name:    "fspath-gbbpath-uroot-outside-module",
@@ -497,9 +468,42 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/u-root/cmds/core/yes",
 			},
 		},
+		// Finding packages in more than 1 module, file system paths.
+		{
+			name: "fspath-multi-module",
+			in: []string{
+				filepath.Join(gbbmod, "cmd/makebb"),
+				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
+			},
+			want: []string{
+				filepath.Join(gbbmod, "cmd/makebb"),
+				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
+			},
+			wantPkgPath: []string{
+				"github.com/u-root/gobusybox/src/cmd/makebb",
+				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
+			},
+		},
+		// Finding packages in more than 1 module, file system paths, GBB_PATHS support.
+		{
+			name:    "fspath-gbbpath-multi-module",
+			gbbPath: []string{gbbmod, gbbroot},
+			in: []string{
+				"cmd/makebb",
+				"test/normaldeps/mod1/cmd/getppid",
+			},
+			want: []string{
+				filepath.Join(gbbmod, "cmd/makebb"),
+				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
+			},
+			wantPkgPath: []string{
+				"github.com/u-root/gobusybox/src/cmd/makebb",
+				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
+			},
+		},
 	}
 
-	for _, tc := range append(sharedTestCases, urootTestCases...) {
+	for _, tc := range append(sharedTestCases, externalDepCases...) {
 		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
@@ -548,7 +552,7 @@ func TestResolve(t *testing.T) {
 		in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/parsebroken"},
 		wantErr: true,
 	})
-	newPkgTests = append(newPkgTests, testCasesWithEnv([]golang.Environ{moduleOnEnv}, urootTestCases...)...)
+	newPkgTests = append(newPkgTests, testCasesWithEnv([]golang.Environ{moduleOnEnv}, externalDepCases...)...)
 	for _, tc := range newPkgTests {
 		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
