@@ -60,7 +60,7 @@ templates:
             (cd test/nested && go build ./...)
             (cd test/nested/nestedmod && go build ./...)
       - run:
-          name: gobuilds
+          name: tests
           command: ./gobuilds.sh
       - run:
           name: build gokrazy & p9 together
