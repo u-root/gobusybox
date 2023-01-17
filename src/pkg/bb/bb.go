@@ -113,14 +113,18 @@ type Opts struct {
 //
 // For documentation on how this works, please refer to the README at the top
 // of the repository.
-func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
+func BuildBusybox(l ulog.Logger, opts *Opts) (error) {
 	if opts == nil {
 		return fmt.Errorf("no options given for busybox build")
 	} else if err := opts.Env.Valid(); err != nil {
 		return err
 	}
 
-	var tmpDir string
+	var (
+		tmpDir string
+		preserve bool
+	)
+
 	if opts.GenSrcDir != "" {
 		var relTmpDir string
 		dirents, err := ioutil.ReadDir(opts.GenSrcDir)
@@ -151,7 +155,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 			return err
 		}
 		defer func() {
-			if nerr != nil {
+			if preserve {
 				l.Printf("Preserving bb generated source directory at %s due to error", tmpDir)
 			} else {
 				os.RemoveAll(tmpDir)
@@ -236,17 +240,20 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		// main.go depends on and prunes everything that isn't needed.
 		cmd := opts.Env.GoCmd("mod", "tidy")
 		cmd.Dir = bbDir
+		preserve = true
 		if o, err := cmd.CombinedOutput(); err != nil {
 			return fmt.Errorf("running `go mod tidy` on the generated busybox main package failed (%v): %s", err, o)
 		}
 	}
 
 	if opts.GenerateOnly {
+		preserve = true
 		return nil
 	}
 
 	// Compile bb.
 	if err := opts.Env.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
+		preserve = true
 		if opts.Env.GO111MODULE == "off" || numNoModule > 0 {
 			return &ErrGopathBuild{
 				CmdDir: bbDir,
