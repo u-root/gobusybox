@@ -321,12 +321,12 @@ This AST transformation does the following:
 -   Writes a `main.go` file with a `main()` that calls into the appropriate Go
     command package based on `argv[0]` or `argv[1]`.
 
-This allows you to take two Go commands, such as Go implementations of `sl` and
-`cowsay` and compile them into one binary.
+This allows you to take two Go commands, such as Go implementations of `dmesg`
+and `strace` and compile them into one binary.
 
 Which command is invoked is determined by `argv[0]` or `argv[1]` if `argv[0]` is
 not recognized. Let's say `bb` is the compiled binary; the following are
-equivalent invocations of `sl` and `cowsay`:
+equivalent invocations of `dmesg` and `strace`:
 
 ```sh
 (cd ./src/cmd/makebb && go install)
