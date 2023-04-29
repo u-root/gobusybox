@@ -34,6 +34,10 @@ templates:
     docker:
       - image: cimg/go:1.19
 
+  go120-template: &go120-template
+    docker:
+      - image: cimg/go:1.20
+
   bazel-template: &bazel-template
     docker:
       - image: us-docker.pkg.dev/u-root-ci/gobusybox/test-bazel:v0.0.1
@@ -102,14 +106,6 @@ workflows:
       - clean-gomod
       - clean-makebb
       - clean-bazel
-      - build-gopath-go115:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go116:
-          requires:
-            - clean-makebb
-            - clean-gopath
       - build-gopath-go117:
           requires:
             - clean-makebb
@@ -122,11 +118,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
-      - test-go116:
+      - build-gopath-go120:
           requires:
             - clean-makebb
             - clean-gopath
-            - clean-gomod
       - test-go117:
           requires:
             - clean-makebb
@@ -142,13 +137,10 @@ workflows:
             - clean-makebb
             - clean-gopath
             - clean-gomod
-      - build-gomod-go115:
+      - test-go120:
           requires:
             - clean-makebb
-            - clean-gomod
-      - build-gomod-go116:
-          requires:
-            - clean-makebb
+            - clean-gopath
             - clean-gomod
       - build-gomod-go117:
           requires:
@@ -162,6 +154,10 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
+      - build-gomod-go120:
+          requires:
+            - clean-makebb
+            - clean-gomod
       - build-gomod-multi-go117:
           requires:
             - clean-makebb
@@ -171,6 +167,10 @@ workflows:
             - clean-makebb
             - clean-gomod
       - build-gomod-multi-go119:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-multi-go120:
           requires:
             - clean-makebb
             - clean-gomod
@@ -192,30 +192,29 @@ workflows:
               only:
                 - main
     jobs:
-      - build-gopath-go115
-      - build-gopath-go116
       - build-gopath-go117
       - build-gopath-go118
       - build-gopath-go119
-      - test-go116
+      - build-gopath-go120
       - test-go117
       - test-go118
       - test-go119
-      - build-gomod-go115
-      - build-gomod-go116
+      - test-go120
       - build-gomod-go117
       - build-gomod-go118
       - build-gomod-go119
+      - build-gomod-go120
       - build-gomod-multi-go117
       - build-gomod-multi-go118
       - build-gomod-multi-go119
+      - build-gomod-multi-go120
       - build-bazel
       - build-bazel-cross
       - build-bazel-test
 
 jobs:
   clean-makebb:
-    <<: [*go119-template, *gomod-template]
+    <<: [*go120-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -236,7 +235,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go119-template, *gopath-template]
+    <<: [*go120-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -268,12 +267,6 @@ jobs:
             cd vendortest
             test -z "$(gofmt -s -l $(find -name '*.go' | grep -v /vendor/))"
 
-  build-gopath-go115:
-    <<: [*go115-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go116:
-    <<: [*go116-template, *gopath-template, *build-gopath-template]
-
   build-gopath-go117:
     <<: [*go117-template, *gopath-template, *build-gopath-template]
 
@@ -283,8 +276,8 @@ jobs:
   build-gopath-go119:
     <<: [*go119-template, *gopath-template, *build-gopath-template]
 
-  test-go116:
-    <<: [*go116-template, *gopath-template, *test-template]
+  build-gopath-go120:
+    <<: [*go120-template, *gopath-template, *build-gopath-template]
 
   test-go117:
     <<: [*go117-template, *gopath-template, *test-template]
@@ -295,8 +288,11 @@ jobs:
   test-go119:
     <<: [*go119-template, *gopath-template, *test-template]
 
+  test-go120:
+    <<: [*go120-template, *gopath-template, *test-template]
+
   clean-gomod:
-    <<: [*go119-template, *gomod-template]
+    <<: [*go120-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -346,12 +342,6 @@ jobs:
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
-  build-gomod-go115:
-    <<: [*go115-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go116:
-    <<: [*go116-template, *gomod-template, *build-gomod-template]
-
   build-gomod-go117:
     <<: [*go117-template, *gomod-template, *build-gomod-template]
 
@@ -361,6 +351,9 @@ jobs:
   build-gomod-go119:
     <<: [*go119-template, *gomod-template, *build-gomod-template]
 
+  build-gomod-go120:
+    <<: [*go120-template, *gomod-template, *build-gomod-template]
+
   build-gomod-multi-go117:
     <<: [*go117-template, *gomod-template, *build-gomod-multi-template]
 
@@ -369,6 +362,9 @@ jobs:
 
   build-gomod-multi-go119:
     <<: [*go119-template, *gomod-template, *build-gomod-multi-template]
+
+  build-gomod-multi-go120:
+    <<: [*go120-template, *gomod-template, *build-gomod-multi-template]
 
   clean-bazel:
     <<: *bazel-template
