@@ -6,6 +6,7 @@
 package main
 
 import (
+	"errors"
 	"log"
 	"os"
 	"path/filepath"
@@ -68,8 +69,15 @@ func ResolveUntilLastSymlink(p string) string {
 
 func run() {
 	name := filepath.Base(os.Args[0])
-	if err := bbmain.Run(name); err != nil {
-		log.Fatalf("%s: %v", name, err)
+	err := bbmain.Run(name)
+	if errors.Is(err, bbmain.ErrNotRegistered) {
+		if len(os.Args) > 1 {
+			os.Args = os.Args[1:]
+			err = bbmain.Run(filepath.Base(os.Args[0]))
+		}
+	}
+	if err != nil {
+		log.Fatalf("%v", err)
 	}
 }
 
@@ -80,14 +88,5 @@ func main() {
 }
 
 func init() {
-	m := func() {
-		if len(os.Args) == 1 {
-			log.Fatalf("Invalid busybox command: %q", os.Args)
-		}
-		// Use argv[1] as the name.
-		os.Args = os.Args[1:]
-		run()
-	}
 	bbmain.Register("bbdiagnose", bbmain.Noop, bbmain.ListCmds)
-	bbmain.RegisterDefault(bbmain.Noop, m)
 }
