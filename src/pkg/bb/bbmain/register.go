@@ -18,7 +18,7 @@ import (
 )
 
 // ErrNotRegistered is returned by Run if the given command is not registered.
-var ErrNotRegistered = errors.New("command not registered")
+var ErrNotRegistered = errors.New("command is not present in busybox")
 
 // Noop is a noop function.
 var Noop = func() {}
@@ -128,7 +128,7 @@ func Run(name string) error {
 	} else if defaultCmd != nil {
 		cmd = defaultCmd
 	} else {
-		return ErrNotRegistered
+		return fmt.Errorf("%w: %s", ErrNotRegistered, name)
 	}
 	cmd.init()
 	cmd.main()
