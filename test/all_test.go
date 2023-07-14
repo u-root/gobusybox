@@ -160,3 +160,56 @@ func TestMakeBB(t *testing.T) {
 		})
 	}
 }
+
+func TestBBSymlink(t *testing.T) {
+	if *makebb == "" {
+		t.Fatalf("Path to makebb is not set")
+	}
+	dir := t.TempDir()
+
+	cmdPath := "./implicitimport/cmd/loghello"
+	want := "Log Hello\n"
+
+	goEnv := "GO111MODULE=on"
+	binary := filepath.Join(dir, "bb")
+
+	// Build the bb.
+	t.Logf("Run: %s %s -o %s %s", goEnv, *makebb, binary, cmdPath)
+
+	cmd := exec.Command(*makebb, "-o", binary, cmdPath)
+	cmd.Env = append(os.Environ(), goEnv)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Logf("makebb: %s", string(out))
+		t.Fatalf("cmd: %v", err)
+	}
+
+	t.Run("symlink", func(t *testing.T) {
+		link := filepath.Join(dir, "loghello")
+		// Test that symlinking works.
+		if err := os.Symlink(binary, link); err != nil {
+			t.Fatal(err)
+		}
+
+		t.Logf("Run: %s", link)
+		out, err = exec.Command(link).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cmd: %v", err)
+		}
+		if got := string(out); got != want {
+			t.Errorf("Output of %s = %v, want %v", link, got, want)
+		}
+	})
+
+	t.Run("argv1", func(t *testing.T) {
+		cmdName := "loghello"
+		t.Logf("Run: %s %s", binary, cmdName)
+		out, err = exec.Command(binary, cmdName).CombinedOutput()
+		if err != nil {
+			t.Fatalf("cmd: %v", err)
+		}
+		if got := string(out); got != want {
+			t.Errorf("Output of %s %s = %v, want %v", binary, cmdName, got, want)
+		}
+	})
+}
