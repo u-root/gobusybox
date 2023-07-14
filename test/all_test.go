@@ -58,6 +58,11 @@ func TestMakeBB(t *testing.T) {
 			want:     map[string]string{"12-fancy-cmd": "12-fancy-cmd\n"},
 		},
 		{
+			testname: "globalvar",
+			cmds:     []string{"./globalvar"},
+			want:     map[string]string{"globalvar": "foo bar\n"},
+		},
+		{
 			testname:  "injectldvar",
 			cmds:      []string{"./injectldvar"},
 			extraArgs: []string{"-go-extra-args=-ldflags", "-go-extra-args=-X 'github.com/u-root/gobusybox/test/injectldvar.Something=Hello World'"},
