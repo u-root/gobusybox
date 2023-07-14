@@ -76,8 +76,18 @@ func run() {
 			err = bbmain.Run(filepath.Base(os.Args[0]))
 		}
 	}
-	if err != nil {
-		log.Fatalf("%v", err)
+	if errors.Is(err, bbmain.ErrNotRegistered) {
+		log.SetFlags(0)
+		log.Printf("Failed to run command: %v", err)
+
+		log.Printf("Supported commands are:")
+		for _, cmd := range bbmain.ListCmds() {
+			log.Printf(" - %s", cmd)
+		}
+		os.Exit(1)
+	} else if err != nil {
+		log.SetFlags(0)
+		log.Fatalf("Failed to run command: %v", err)
 	}
 }
 
@@ -85,8 +95,4 @@ func main() {
 	os.Args[0] = ResolveUntilLastSymlink(os.Args[0])
 
 	run()
-}
-
-func init() {
-	bbmain.Register("bbdiagnose", bbmain.Noop, bbmain.ListCmds)
 }
