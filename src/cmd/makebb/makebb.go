@@ -26,6 +26,8 @@ var (
 func main() {
 	bopts := &golang.BuildOpts{}
 	bopts.RegisterFlags(flag.CommandLine)
+	env := golang.Default()
+	env.RegisterFlags(flag.CommandLine)
 	flag.Parse()
 
 	// Why doesn't the log package export this as a default?
@@ -36,7 +38,6 @@ func main() {
 		l.Fatal(err)
 	}
 
-	env := golang.Default()
 	if env.CgoEnabled {
 		l.Printf("Disabling CGO for u-root...")
 		env.CgoEnabled = false
