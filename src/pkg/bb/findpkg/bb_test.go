@@ -84,7 +84,7 @@ type testCase struct {
 	// name of the test case
 	name string
 	// envs to try it in (if unset, default will be GO111MODULE=on and off)
-	envs []golang.Environ
+	envs []*golang.Environ
 	// wd sets the findpkg.Env.WorkingDirectory
 	// WorkingDirectory is the directory used for module-enabled
 	// `go list` lookups. The go.mod in this directory (or one of
@@ -121,14 +121,9 @@ func TestResolve(t *testing.T) {
 	}
 	gbbroot := filepath.Dir(gbbmod)
 
-	moduleOffEnv := golang.Default()
-	moduleOffEnv.GO111MODULE = "off"
-
-	moduleOnEnv := golang.Default()
-	moduleOnEnv.GO111MODULE = "on"
-
-	noGoToolEnv := golang.Default()
-	noGoToolEnv.GOROOT = t.TempDir()
+	moduleOffEnv := golang.Default(golang.WithGO111MODULE("off"))
+	moduleOnEnv := golang.Default(golang.WithGO111MODULE("on"))
+	noGoToolEnv := golang.Default(golang.WithGOROOT(t.TempDir()))
 
 	if err := os.Mkdir("./test/resolvebroken", 0777); err != nil {
 		t.Fatal(err)
@@ -307,7 +302,7 @@ func TestResolve(t *testing.T) {
 		// of this test, this is an ON only test.
 		{
 			name: "pkgpath-multi-module",
-			envs: []golang.Environ{moduleOnEnv},
+			envs: []*golang.Environ{moduleOnEnv},
 			wd:   filepath.Join(gbbroot, "test/resolve-modules"),
 			in: []string{
 				"github.com/u-root/u-root/cmds/core/init",
@@ -348,7 +343,7 @@ func TestResolve(t *testing.T) {
 		// of this test, this is an ON only test.
 		{
 			name: "pkgpath-multi-module-exclusion-glob",
-			envs: []golang.Environ{moduleOnEnv},
+			envs: []*golang.Environ{moduleOnEnv},
 			wd:   filepath.Join(gbbroot, "test/resolve-modules"),
 			in: []string{
 				"github.com/u-root/u-root/cmds/core/init",
@@ -370,14 +365,14 @@ func TestResolve(t *testing.T) {
 		},
 		{
 			name:        "fspath-nomodule",
-			envs:        []golang.Environ{moduleOffEnv},
+			envs:        []*golang.Environ{moduleOffEnv},
 			in:          []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
 			want:        []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
 			wantPkgPath: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 		},
 		{
 			name:        "pkgpath-nomodule",
-			envs:        []golang.Environ{moduleOffEnv},
+			envs:        []*golang.Environ{moduleOffEnv},
 			in:          []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 			want:        []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 			wantPkgPath: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
@@ -392,19 +387,19 @@ func TestResolve(t *testing.T) {
 		// Some error cases where $GOROOT/bin/go is unavailable, so packages.Load fails.
 		{
 			name:    "fspath-load-fails",
-			envs:    []golang.Environ{noGoToolEnv},
+			envs:    []*golang.Environ{noGoToolEnv},
 			in:      []string{"./test/goglob/*"},
 			wantErr: true,
 		},
 		{
 			name:    "pkgpath-batched-load-fails",
-			envs:    []golang.Environ{noGoToolEnv},
+			envs:    []*golang.Environ{noGoToolEnv},
 			in:      []string{"./test/goglob/..."},
 			wantErr: true,
 		},
 		{
 			name:    "pkgpath-glob-load-fails",
-			envs:    []golang.Environ{noGoToolEnv},
+			envs:    []*golang.Environ{noGoToolEnv},
 			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/*"},
 			wantErr: true,
 		},
@@ -504,7 +499,7 @@ func TestResolve(t *testing.T) {
 	}
 
 	for _, tc := range append(sharedTestCases, externalDepCases...) {
-		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
+		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
 		}
@@ -529,14 +524,13 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
-	noGopathModuleOffEnv := moduleOffEnv
-	noGopathModuleOffEnv.GOPATH = ""
+	noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(""))
 
 	newPkgTests := append(sharedTestCases, testCase{
 		// UROOT_SOURCE, file system paths, non-Gobusybox module.
 		// Cannot resolve dependency packages without GOPATH.
 		name:        "fspath-uroot-source-no-GOPATH",
-		envs:        []golang.Environ{noGopathModuleOffEnv},
+		envs:        []*golang.Environ{noGopathModuleOffEnv},
 		urootSource: urootSrc,
 		in: []string{
 			"cmds/core/ip",
@@ -552,9 +546,9 @@ func TestResolve(t *testing.T) {
 		in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/parsebroken"},
 		wantErr: true,
 	})
-	newPkgTests = append(newPkgTests, testCasesWithEnv([]golang.Environ{moduleOnEnv}, externalDepCases...)...)
+	newPkgTests = append(newPkgTests, testCasesWithEnv([]*golang.Environ{moduleOnEnv}, externalDepCases...)...)
 	for _, tc := range newPkgTests {
-		envs := []golang.Environ{moduleOffEnv, moduleOnEnv}
+		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
 		}
@@ -587,7 +581,7 @@ func TestResolve(t *testing.T) {
 	}
 }
 
-func testCasesWithEnv(envs []golang.Environ, tcs ...testCase) []testCase {
+func testCasesWithEnv(envs []*golang.Environ, tcs ...testCase) []testCase {
 	var newTCs []testCase
 	for _, tc := range tcs {
 		newTC := tc
