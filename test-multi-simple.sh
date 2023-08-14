@@ -26,7 +26,8 @@ function ctrl_c() {
 trap ctrl_c INT
 
 (cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 1c3bb2365452542d52263bd4eeaafec0b83e90e2)
-(cd $TMPDIR && git clone https://github.com/hugelgupf/p9)
+# Pin to commit before Go 1.18+ was required.
+(cd $TMPDIR && git clone https://github.com/hugelgupf/p9 && cd p9 && git checkout 8313e2fcf87db241a29570a9ed75eab866c104bf)
 
 # Compile gokrazy and p9 together. Got ideas for what to add here? Let me know.
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/gokrazy/cmd/\* $TMPDIR/p9/cmd/*
