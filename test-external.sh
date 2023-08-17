@@ -27,9 +27,10 @@ trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
 (cd $TMPDIR && git clone https://github.com/u-root/u-root)
-(cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 1c3bb2365452542d52263bd4eeaafec0b83e90e2)
-# Pin to commit before Go 1.18 was required.
-(cd $TMPDIR && git clone https://github.com/hugelgupf/p9 && cd p9 && git checkout 8313e2fcf87db241a29570a9ed75eab866c104bf)
+# Pin to commit before Go 1.20 was required. (We test 1.18+.)
+(cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 254af2bf3c82ff9f56e89794b2c146ef9cc85dc6)
+# Pin to commit before Go 1.20 was required. (We test 1.18+.)
+(cd $TMPDIR && git clone https://github.com/hugelgupf/p9 && cd p9 && git checkout 660eb2337e3c1878298fe550ad03248f329eeb72)
 
 # Make u-root have modules.
 (cd $TMPDIR/u-root && rm -rf vendor)
