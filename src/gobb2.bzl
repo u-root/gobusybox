@@ -12,7 +12,7 @@ Example usage to create a busybox binary:
 """
 
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_context", "go_library")
-load("@io_bazel_rules_go//go/private/rules:transition.bzl", "go_transition_rule")
+load("@io_bazel_rules_go//go/private/rules:transition.bzl", "go_transition")
 load("@io_bazel_rules_go//go/private:providers.bzl", "GoArchive", "GoLibrary", "GoSource")
 load(
     "@io_bazel_rules_go//go/platform:list.bzl",
@@ -181,11 +181,12 @@ def _go_busybox_impl(ctx):
     output_dir = None
 
     args = ctx.actions.args()
-    args.add("--template_pkg", "%s/main" % ctx.attr._template.label.package)
+    template = ctx.attr._template[0] if type(ctx.attr._template) == "list" else ctx.attr._template
+    args.add("--template_pkg", "%s/main" % template.label.package)
 
     outputs = []
     inputs = []
-    for f in ctx.attr._template[GoArchive].source.srcs:
+    for f in template[GoArchive].source.srcs:
         args.add("--package_file", f.path)
         inputs.append(f)
 
@@ -219,7 +220,7 @@ def _go_busybox_impl(ctx):
         is_main = True,
     )
     attr = struct(
-        deps = ctx.attr.cmds + ctx.attr._template[GoDepInfo].targets,
+        deps = ctx.attr.cmds + template[GoDepInfo].targets,
     )
     source = go.library_to_source(go, attr, library, ctx.coverage_instrumented())
     archive, executable, runfiles = go.binary(
@@ -245,17 +246,19 @@ def _go_busybox_impl(ctx):
         ),
     ]
 
-_go_busybox = go_transition_rule(
+_go_busybox = rule(
     attrs = {
         "cmds": attr.label_list(
             mandatory = True,
             allow_rules = ["go_busybox_library"],
+            cfg = go_transition,
         ),
         "_template": attr.label(
             providers = [GoArchive, GoDepInfo],
             allow_rules = ["go_binary"],
             aspects = [go_dep_aspect],
             default = Label("//src/pkg/bb/bbmain/cmd"),
+            cfg = go_transition,
         ),
         "_make_main": attr.label(
             executable = True,
@@ -263,8 +266,18 @@ _go_busybox = go_transition_rule(
             allow_files = True,
             default = Label("//src/cmd/makebbmain"),
         ),
+        "goarch": attr.string(default = "auto"),
+        "goos": attr.string(default = "auto"),
+        "gotags": attr.string_list(),
+        "pure": attr.string(default = "auto"),
+        "race": attr.string(default = "auto"),
+        "msan": attr.string(default = "auto"),
         "_go_context_data": attr.label(
             default = "@io_bazel_rules_go//:go_context_data",
+            cfg = go_transition,
+        ),
+        "_allowlist_function_transition": attr.label(
+            default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
         ),
     },
     executable = True,
@@ -272,7 +285,16 @@ _go_busybox = go_transition_rule(
     toolchains = ["@io_bazel_rules_go//go:toolchain"],
 )
 
-def go_busybox(name, cmds = [], **kwargs):
+def go_busybox(
+        name,
+        cmds = [],
+        goarch = "auto",
+        goos = "auto",
+        gotags = [],
+        pure = "auto",
+        race = "auto",
+        msan = "auto",
+        **kwargs):
     rewrittenCmds = []
     cmd_names = []
     for c in cmds:
@@ -289,5 +311,11 @@ def go_busybox(name, cmds = [], **kwargs):
     _go_busybox(
         name = name,
         cmds = rewrittenCmds,
+        goarch = goarch,
+        goos = goos,
+        pure = pure,
+        race = race,
+        msan = msan,
+        gotags = gotags,
         **kwargs
     )
