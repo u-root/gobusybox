@@ -178,7 +178,7 @@ func (c Environ) envCommon() []string {
 func (c Environ) EnvHuman() []string {
 	env := c.envCommon()
 	if c.GOROOT != "" {
-		env = append(env, fmt.Sprintf("PATH=%s:$PATH", filepath.Join(c.GOROOT, "bin")))
+		env = append(env, fmt.Sprintf("PATH=%s", filepath.Join(c.GOROOT, "bin")))
 	}
 	return env
 }
@@ -188,9 +188,9 @@ func (c Environ) Env() []string {
 	env := c.envCommon()
 	if c.GOROOT != "" {
 		// If GOROOT is set to a different version of Go, we must
-		// ensure that $GOROOT/bin is also in path to make the "go"
-		// binary available to golang.org/x/tools/packages.
-		env = append(env, fmt.Sprintf("PATH=%s:%s", filepath.Join(c.GOROOT, "bin"), os.Getenv("PATH")))
+		// ensure that $GOROOT/bin is the path to make the "go" binary
+		// available to golang.org/x/tools/packages.
+		env = append(env, fmt.Sprintf("PATH=%s", filepath.Join(c.GOROOT, "bin")))
 	}
 	return env
 }
