@@ -2,37 +2,30 @@ load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "f2dcd210c7095febe54b804bb1cd3a58fe8435a909db2ec04e31542631cf715c",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.31.0/rules_go-v0.31.0.zip",
-        "https://github.com/bazelbuild/rules_go/releases/download/v0.31.0/rules_go-v0.31.0.zip",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.43.0/rules_go-v0.43.0.zip",
     ],
 )
 
 http_archive(
     name = "bazel_gazelle",
-    sha256 = "de69a09dc70417580aabf20a28619bb3ef60d038470c7cf8442fafcf627c21cb",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.34.0/bazel-gazelle-v0.34.0.tar.gz",
     ],
 )
 
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
 load("//:deps.bzl", "go_dependencies")
-load("@io_bazel_rules_go//extras:embed_data_deps.bzl", "go_embed_data_dependencies")
 
 # gazelle:repository_macro deps.bzl%go_dependencies
 go_dependencies()
 
 go_rules_dependencies()
 
-go_register_toolchains(version = "1.17")
+go_register_toolchains(version = "1.20")
 
 gazelle_dependencies()
-
-go_embed_data_dependencies()
 
 http_archive(
     name = "com_google_protobuf",
@@ -60,6 +53,7 @@ load("@bazel_gazelle//:deps.bzl", "go_repository")
 
 go_repository(
     name = "com_github_u-root_u-root",
-    commit = "5be789964f562ae78cc5e41899f26c7c01b3a645",
+    #commit = "5be789964f562ae78cc5e41899f26c7c01b3a645",
+    commit = "v0.11.0",
     importpath = "github.com/u-root/u-root",
 )
