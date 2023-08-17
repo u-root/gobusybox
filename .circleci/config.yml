@@ -206,7 +206,7 @@ workflows:
 
 jobs:
   clean-makebb:
-    <<: [*go120-template, *gomod-template]
+    <<: [*go121-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -227,7 +227,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go120-template, *gopath-template]
+    <<: [*go121-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -284,7 +284,7 @@ jobs:
     <<: [*go121-template, *gopath-template, *test-template]
 
   clean-gomod:
-    <<: [*go120-template, *gomod-template]
+    <<: [*go121-template, *gomod-template]
     steps:
       - checkout
       - run:
