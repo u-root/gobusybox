@@ -32,7 +32,7 @@ templates:
 
   bazel-template: &bazel-template
     docker:
-      - image: us-docker.pkg.dev/u-root-ci/gobusybox/test-bazel:v0.0.1
+      - image: cimg/go:1.21
     working_directory: /home/circleci/go/bazel_gobusybox
     environment:
       - GOPATH: "/home/circleci/go"
@@ -362,10 +362,11 @@ jobs:
     <<: *bazel-template
     steps:
       - checkout
+      - run: go install github.com/bazelbuild/bazelisk@latest
       - run:
           name: run gazelle
           command: |
-            bazel run :gazelle
+            bazelisk run :gazelle
             git status
             if [[ -n "$(git status --porcelain .)" ]]; then
               echo 'BUILD files are out-of-date: run `bazel run :gazelle` and then check in the changes'
@@ -375,7 +376,7 @@ jobs:
       - run:
           name: sync bazel deps.bzl with src/go.mod
           command: |
-            bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
+            bazelisk run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
             git status
             if [[ -n "$(git status --porcelain deps.bzl)" ]]; then
               echo 'go.mod deps are out of sync with deps.bzl: run '
@@ -388,7 +389,7 @@ jobs:
       - run:
           name: run buildifier
           command: |
-            bazel run :buildifier -- -r .
+            bazelisk run :buildifier -- -r .
             # For some reason, running buildifier or gazelle updates go.sum.
             git checkout -- src/go.sum
             git status
@@ -402,33 +403,36 @@ jobs:
     <<: *bazel-template
     steps:
       - checkout
+      - run: go install github.com/bazelbuild/bazelisk@latest
       - run:
           name: build busybox
           command: |
-            bazel build //src:bb
+            bazelisk build //src:bb
             ./bazel-bin/src/bb_/bb helloworld
       - run:
           name: build everything (amd64)
-          command: bazel build //src/...
+          command: bazelisk build //src/...
 
   build-bazel-cross:
     <<: *bazel-template
     steps:
       - checkout
+      - run: go install github.com/bazelbuild/bazelisk@latest
       - run:
           name: bazel cross-compile
           command: |
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:uroot_bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:uroot_bb
+            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:bb
 
   build-bazel-test:
     <<: *bazel-template
     steps:
       - checkout
+      - run: go install github.com/bazelbuild/bazelisk@latest
       - run:
           name: bazel test
-          command: bazel query 'tests(//src/...) except attr(tags, notest, //src/...)' | xargs bazel test
+          command: bazelisk query 'tests(//src/...) except attr(tags, notest, //src/...)' | xargs bazelisk test
