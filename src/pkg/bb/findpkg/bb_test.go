@@ -524,7 +524,7 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
-	noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(""))
+	noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(t.TempDir()))
 
 	newPkgTests := append(sharedTestCases, testCase{
 		// UROOT_SOURCE, file system paths, non-Gobusybox module.
