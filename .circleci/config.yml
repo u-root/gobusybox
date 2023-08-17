@@ -14,14 +14,6 @@ templates:
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
 
-  go115-template: &go115-template
-    docker:
-      - image: cimg/go:1.15
-
-  go116-template: &go116-template
-    docker:
-      - image: cimg/go:1.16
-
   go118-template: &go118-template
     docker:
       - image: cimg/go:1.18
