@@ -67,7 +67,7 @@ func ResolveUntilLastSymlink(p string) string {
 	return p
 }
 
-func run() {
+func run() int {
 	name := filepath.Base(os.Args[0])
 	err := bbmain.Run(name)
 	if errors.Is(err, bbmain.ErrNotRegistered) {
@@ -84,15 +84,23 @@ func run() {
 		for _, cmd := range bbmain.ListCmds() {
 			log.Printf(" - %s", cmd)
 		}
-		os.Exit(1)
-	} else if err != nil {
+		return 1
+	} 
+	if err != nil {
 		log.SetFlags(0)
-		log.Fatalf("Failed to run command: %v", err)
+		log.Printf("Failed to run command: %v", err)
+		return 1
 	}
+	return 0
 }
 
 func main() {
-	os.Args[0] = ResolveUntilLastSymlink(os.Args[0])
+	// This for loop will normally run once and Exit.
+	// In the case of bare metal environments, which can override
+	// Exit, it will run forever.
+	for {
+		os.Args[0] = ResolveUntilLastSymlink(os.Args[0])
 
-	run()
+		bbmain.Exit(run())
+	}
 }

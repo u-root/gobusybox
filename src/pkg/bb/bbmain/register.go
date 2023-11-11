@@ -22,6 +22,10 @@ var ErrNotRegistered = errors.New("command is not present in busybox")
 // Noop is a noop function.
 var Noop = func() {}
 
+// Exit is called on Exit, and defaults to os.Exit
+// Bare metal environments can override it.
+var Exit = os.Exit
+
 // ListCmds returns all supported commands.
 func ListCmds() []string {
 	var cmds []string
@@ -60,7 +64,7 @@ func RegisterDefault(init, main func()) {
 
 // Run runs the command with the given name.
 //
-// If the command's main exits without calling os.Exit, Run will exit with exit
+// If the command's main exits without calling Exit, Run will exit with exit
 // code 0.
 func Run(name string) error {
 	var cmd *bbCmd
@@ -73,7 +77,7 @@ func Run(name string) error {
 	}
 	cmd.init()
 	cmd.main()
-	os.Exit(0)
+	Exit(0)
 	// Unreachable.
 	return nil
 }
