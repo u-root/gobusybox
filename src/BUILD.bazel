@@ -70,7 +70,8 @@ uroot_linux_core_cmds = [
     "@com_github_u-root_u-root//cmds/core/find",
     "@com_github_u-root_u-root//cmds/core/free",
     "@com_github_u-root_u-root//cmds/core/fusermount",
-    "@com_github_u-root_u-root//cmds/core/gpgv",
+    # TODO: reenable when https://github.com/bazelbuild/rules_go/issues/3799 is fixed.
+    #"@com_github_u-root_u-root//cmds/core/gpgv",
     "@com_github_u-root_u-root//cmds/core/gpt",
     "@com_github_u-root_u-root//cmds/core/grep",
     "@com_github_u-root_u-root//cmds/core/gzip",
@@ -150,7 +151,8 @@ uroot_linux_boot_cmds = [
     "@com_github_u-root_u-root//cmds/boot/boot",
     "@com_github_u-root_u-root//cmds/boot/fbnetboot",
     "@com_github_u-root_u-root//cmds/boot/localboot",
-    "@com_github_u-root_u-root//cmds/boot/pxeboot",
+    # TODO: reenable when https://github.com/bazelbuild/rules_go/issues/3799 is fixed.
+    #"@com_github_u-root_u-root//cmds/boot/pxeboot",
     "@com_github_u-root_u-root//cmds/boot/systemboot",
 ]
 
