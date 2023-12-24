@@ -23,24 +23,32 @@ var (
 	urootSource = flag.String("uroot-source", "", "Directory path to u-root source location")
 )
 
-func TestModules(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-modules-")
-	if err != nil {
+func mustMkdir(t *testing.T, path string, mode os.FileMode) {
+	if err := os.MkdirAll(path, mode); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(dir)
+}
 
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd1"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd2"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd3"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd4"), 0755)
-	os.MkdirAll(filepath.Join(dir, "nomod/cmd/cmd7"), 0755)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod2/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod2/go.mod"), nil, 0644)
+func mustWrite(t *testing.T, path string, contents []byte, mode os.FileMode) {
+	if err := os.WriteFile(path, contents, mode); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestModules(t *testing.T) {
+	dir := t.TempDir()
+
+	mustMkdir(t, filepath.Join(dir, "mod1/cmd/cmd1"), 0755)
+	mustMkdir(t, filepath.Join(dir, "mod1/cmd/cmd2"), 0755)
+	mustMkdir(t, filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"), 0755)
+	mustMkdir(t, filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"), 0755)
+	mustMkdir(t, filepath.Join(dir, "mod2/cmd/cmd3"), 0755)
+	mustMkdir(t, filepath.Join(dir, "mod2/cmd/cmd4"), 0755)
+	mustMkdir(t, filepath.Join(dir, "nomod/cmd/cmd7"), 0755)
+	mustWrite(t, filepath.Join(dir, "mod1/go.mod"), nil, 0644)
+	mustWrite(t, filepath.Join(dir, "mod1/nestedmod1/go.mod"), nil, 0644)
+	mustWrite(t, filepath.Join(dir, "mod1/nestedmod2/go.mod"), nil, 0644)
+	mustWrite(t, filepath.Join(dir, "mod2/go.mod"), nil, 0644)
 
 	paths := []string{
 		filepath.Join(dir, "mod1/cmd/cmd1"),

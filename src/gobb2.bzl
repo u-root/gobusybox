@@ -182,7 +182,6 @@ def _go_busybox_impl(ctx):
 
     args = ctx.actions.args()
     template = ctx.attr._template[0] if type(ctx.attr._template) == "list" else ctx.attr._template
-    args.add("--template_pkg", "%s/main" % template.label.package)
 
     outputs = []
     inputs = []

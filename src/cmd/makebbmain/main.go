@@ -16,7 +16,6 @@ import (
 )
 
 var (
-	pkg      = flag.String("template_pkg", "", "Go import package path")
 	destDir  = flag.String("dest_dir", "", "Destination directory")
 	pkgFiles uflag.Strings
 	commands uflag.Strings

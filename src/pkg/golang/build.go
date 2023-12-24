@@ -175,6 +175,8 @@ func (c Environ) envCommon() []string {
 	return env
 }
 
+// EnvHuman returns all env vars used by c, with an abbreviated
+// PATH=$PATH:<added stuff> rather than displaying the full PATH.
 func (c Environ) EnvHuman() []string {
 	env := c.envCommon()
 	if c.GOROOT != "" {
@@ -200,7 +202,7 @@ func (c Environ) String() string {
 	return strings.Join(c.EnvHuman(), " ")
 }
 
-// Optional arguments to Environ.BuildDir.
+// BuildOpts are `go build` arguments.
 type BuildOpts struct {
 	// NoStrip builds an unstripped binary.
 	//
