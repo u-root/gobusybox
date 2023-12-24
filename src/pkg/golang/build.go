@@ -23,6 +23,7 @@ import (
 type ModBehavior string
 
 const (
+	ModNone     ModBehavior = ""
 	ModOnly     ModBehavior = "mod"
 	ModReadonly ModBehavior = "readonly"
 	ModVendor   ModBehavior = "vendor"
@@ -41,8 +42,13 @@ type Environ struct {
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
 	arg := (*uflag.Strings)(&c.BuildTags)
 	f.Var(arg, "go-build-tags", "Go build tags")
+
 	mod := (*string)(&c.Mod)
-	f.StringVar(mod, "go-mod", "vendor", "Value of -mod to go commands (allowed: vendor, mod, readonly)")
+	defMod := ""
+	if c.GO111MODULE == "on" || c.GO111MODULE == "auto" {
+		defMod = "readonly"
+	}
+	f.StringVar(mod, "go-mod", defMod, "Value of -mod to go commands (allowed: (empty), vendor, mod, readonly)")
 }
 
 // Valid returns an error if GOARCH, GOROOT, or GOOS are unset.
@@ -134,7 +140,7 @@ func (c *Environ) Lookup(mode packages.LoadMode, dir string, patterns ...string)
 		tags := fmt.Sprintf("-tags=%s", strings.Join(c.Context.BuildTags, ","))
 		cfg.BuildFlags = []string{tags}
 	}
-	if c.GO111MODULE != "off" {
+	if c.GO111MODULE != "off" && len(c.Mod) > 0 {
 		cfg.BuildFlags = append(cfg.BuildFlags, "-mod", string(c.Mod))
 	}
 	return packages.Load(cfg, patterns...)
@@ -258,7 +264,7 @@ func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) er
 
 		"-o", binaryPath,
 	}
-	if c.GO111MODULE != "off" {
+	if c.GO111MODULE != "off" && len(c.Mod) > 0 {
 		args = append(args, "-mod", string(c.Mod))
 	}
 	if c.InstallSuffix != "" {
