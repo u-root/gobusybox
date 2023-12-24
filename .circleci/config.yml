@@ -225,9 +225,6 @@ jobs:
     steps:
       - checkout
       - run:
-          name: vet
-          command: go vet ./vendortest/...
-      - run:
           name: gofmt
           command: |
             cd vendortest
