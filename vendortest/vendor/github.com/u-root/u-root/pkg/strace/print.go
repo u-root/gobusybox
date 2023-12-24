@@ -115,6 +115,7 @@ func fdpair(t Task, addr Addr) string {
 	return fmt.Sprintf("%#x [%d %d]", addr, fds[0], fds[1])
 }
 
+// SaneUtsname is an utsname without the weird partially-filled []byte
 type SaneUtsname struct {
 	Sysname    string
 	Nodename   string
@@ -124,6 +125,8 @@ type SaneUtsname struct {
 	Domainname string
 }
 
+// SaneUname returns a SaneUtsname, i.e. a Unix Time Sharing name without the weird
+// partially filled []byte
 func SaneUname(u unix.Utsname) SaneUtsname {
 	return SaneUtsname{
 		Sysname:    convertUname(u.Sysname),
@@ -146,14 +149,4 @@ func uname(t Task, addr Addr) string {
 	}
 
 	return fmt.Sprintf("%#x %#v", addr, SaneUname(u))
-}
-
-// alignUp rounds a length up to an alignment. align must be a power of 2.
-func alignUp(length int, align uint) int {
-	return (length + int(align) - 1) & ^(int(align) - 1)
-}
-
-// alignDown rounds a down to an alignment. align must be a power of 2.
-func alignDown(length int, align uint) int {
-	return length & ^(int(align) - 1)
 }
