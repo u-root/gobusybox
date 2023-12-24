@@ -20,11 +20,20 @@ import (
 	"golang.org/x/tools/go/packages"
 )
 
+type ModBehavior string
+
+const (
+	ModOnly     ModBehavior = "mod"
+	ModReadonly ModBehavior = "readonly"
+	ModVendor   ModBehavior = "vendor"
+)
+
 // Environ are the environment variables for the Go compiler.
 type Environ struct {
 	build.Context
 
 	GO111MODULE string
+	Mod         ModBehavior
 	GBBDEBUG    bool
 }
 
@@ -32,6 +41,8 @@ type Environ struct {
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
 	arg := (*uflag.Strings)(&c.BuildTags)
 	f.Var(arg, "go-build-tags", "Go build tags")
+	mod := (*string)(&c.Mod)
+	f.StringVar(mod, "go-mod", "vendor", "Value of -mod to go commands (allowed: vendor, mod, readonly)")
 }
 
 // Valid returns an error if GOARCH, GOROOT, or GOOS are unset.
@@ -104,6 +115,7 @@ func Default(opt ...Opt) *Environ {
 		Context:     build.Default,
 		GO111MODULE: os.Getenv("GO111MODULE"),
 		GBBDEBUG:    parseBool(os.Getenv("GBBDEBUG")),
+		Mod:         ModVendor,
 	}
 	for _, o := range opt {
 		o(env)
@@ -122,12 +134,16 @@ func (c *Environ) Lookup(mode packages.LoadMode, dir string, patterns ...string)
 		tags := fmt.Sprintf("-tags=%s", strings.Join(c.Context.BuildTags, ","))
 		cfg.BuildFlags = []string{tags}
 	}
+	if c.GO111MODULE != "off" {
+		cfg.BuildFlags = append(cfg.BuildFlags, "-mod", string(c.Mod))
+	}
 	return packages.Load(cfg, patterns...)
 }
 
 // GoCmd runs a go command in the environment.
-func (c Environ) GoCmd(args ...string) *exec.Cmd {
+func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
 	goBin := filepath.Join(c.GOROOT, "bin", "go")
+	args = append([]string{gocmd}, args...)
 	cmd := exec.Command(goBin, args...)
 	if c.GBBDEBUG {
 		log.Printf("GBB Go invocation: %s %s %#v", c, goBin, args)
@@ -237,12 +253,13 @@ func (b *BuildOpts) RegisterFlags(f *flag.FlagSet) {
 // object to `binaryPath`.
 func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) error {
 	args := []string{
-		"build",
-
 		// Force rebuilding of packages.
 		"-a",
 
 		"-o", binaryPath,
+	}
+	if c.GO111MODULE != "off" {
+		args = append(args, "-mod", string(c.Mod))
 	}
 	if c.InstallSuffix != "" {
 		args = append(args, "-installsuffix", c.Context.InstallSuffix)
@@ -272,7 +289,7 @@ func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) er
 	// We always set the working directory, so this is always '.'.
 	args = append(args, ".")
 
-	cmd := c.GoCmd(args...)
+	cmd := c.GoCmd("build", args...)
 	cmd.Dir = dirPath
 
 	if o, err := cmd.CombinedOutput(); err != nil {
