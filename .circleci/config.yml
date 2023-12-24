@@ -98,6 +98,9 @@ workflows:
       - clean-gomod
       - clean-makebb
       - clean-bazel
+      - build-bazel
+      - build-bazel-cross
+      - build-bazel-test
       - build-gopath-go118:
           requires:
             - clean-makebb
@@ -166,15 +169,6 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
-      - build-bazel:
-          requires:
-            - clean-bazel
-      - build-bazel-cross:
-          requires:
-            - clean-bazel
-      - build-bazel-test:
-          requires:
-            - clean-bazel
   nightly:
     triggers:
       - schedule:
