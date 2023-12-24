@@ -123,7 +123,8 @@ func TestResolve(t *testing.T) {
 
 	moduleOffEnv := golang.Default(golang.WithGO111MODULE("off"))
 	moduleOnEnv := golang.Default(golang.WithGO111MODULE("on"))
-	noGoToolEnv := golang.Default(golang.WithGOROOT(t.TempDir()))
+	// TODO: re-enable when https://github.com/golang/go/issues/62114 is resolved.
+	// noGoToolEnv := golang.Default(golang.WithGOROOT(t.TempDir()))
 
 	if err := os.Mkdir("./test/resolvebroken", 0777); err != nil {
 		t.Fatal(err)
@@ -385,24 +386,27 @@ func TestResolve(t *testing.T) {
 			err:     errNoMatch,
 		},
 		// Some error cases where $GOROOT/bin/go is unavailable, so packages.Load fails.
-		{
-			name:    "fspath-load-fails",
-			envs:    []*golang.Environ{noGoToolEnv},
-			in:      []string{"./test/goglob/*"},
-			wantErr: true,
-		},
-		{
-			name:    "pkgpath-batched-load-fails",
-			envs:    []*golang.Environ{noGoToolEnv},
-			in:      []string{"./test/goglob/..."},
-			wantErr: true,
-		},
-		{
-			name:    "pkgpath-glob-load-fails",
-			envs:    []*golang.Environ{noGoToolEnv},
-			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/*"},
-			wantErr: true,
-		},
+		/*
+			TODO: re-enable when https://github.com/golang/go/issues/62114 is resolved.
+			{
+				name:    "fspath-load-fails",
+				envs:    []*golang.Environ{noGoToolEnv},
+				in:      []string{"./test/goglob/*"},
+				wantErr: true,
+			},
+			{
+				name:    "pkgpath-batched-load-fails",
+				envs:    []*golang.Environ{noGoToolEnv},
+				in:      []string{"./test/goglob/..."},
+				wantErr: true,
+			},
+			{
+				name:    "pkgpath-glob-load-fails",
+				envs:    []*golang.Environ{noGoToolEnv},
+				in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/*"},
+				wantErr: true,
+			},
+		*/
 	}
 
 	// test cases that depend on external repositories.
