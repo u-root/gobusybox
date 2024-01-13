@@ -30,7 +30,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"github.com/google/goterm/term"
@@ -255,11 +254,10 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 				GOPATH: tmpDir,
 				Err:    err,
 			}
-		} else {
-			return &ErrModuleBuild{
-				CmdDir: bbDir,
-				Err:    err,
-			}
+		}
+		return &ErrModuleBuild{
+			CmdDir: bbDir,
+			Err:    err,
 		}
 	}
 	return nil
@@ -504,7 +502,7 @@ func findLocalModules(l ulog.Logger, mainPkgs []*bbinternal.Package) (map[string
 
 			if lm, ok := localModules[p.Module.Path]; ok && lm.m.Dir != p.Module.Dir {
 				gbbstrict, set := os.LookupEnv("GBB_STRICT")
-				if set == false {
+				if !set {
 					l.Printf("GBB_STRICT is not set.")
 				}
 				if gbbstrict != "1" {
@@ -647,7 +645,9 @@ func copyLocalDeps(l ulog.Logger, env *golang.Environ, bbDir, tmpDir, pkgDir str
 		// decides to go on the internet.
 		var mod modfile.File
 
-		mod.AddModuleStmt("bb.u-root.com/bb")
+		if err := mod.AddModuleStmt("bb.u-root.com/bb"); err != nil {
+			return fmt.Errorf("failed to add bb.u-root.com/bb to generated go.mod: %w", err)
+		}
 		for mpath, module := range localModules {
 			v := module.Version
 			if len(v) == 0 {
@@ -679,23 +679,9 @@ func copyLocalDeps(l ulog.Logger, env *golang.Environ, bbDir, tmpDir, pkgDir str
 		// directives.
 		//
 		// Warn the user if they are potentially incompatible.
-		if err := ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), gomod, 0755); err != nil {
-			return err
-		}
-		return nil
+		return ioutil.WriteFile(filepath.Join(bbDir, "go.mod"), gomod, 0755)
 	}
 	return nil
-}
-
-func versionNum(mpath string) string {
-	last := path.Base(mpath)
-	if len(last) == 0 {
-		return "v0"
-	}
-	if matched, _ := regexp.Match("v[0-9]+", []byte(last)); matched {
-		return last
-	}
-	return "v0"
 }
 
 // deps recursively iterates through imports and returns the set of packages
