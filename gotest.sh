@@ -10,6 +10,7 @@ function ctrl_c() {
 }
 trap ctrl_c INT
 
-(cd $TMPDIR && git clone https://github.com/u-root/u-root)
+# Checkout before 1.20+ was required.
+(cd $TMPDIR && git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
 (cd ./src && GO111MODULE=on go test -cover ./pkg/bb/findpkg/... --uroot-source=$TMPDIR/u-root)
 rm -rf $TMPDIR
