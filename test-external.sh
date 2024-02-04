@@ -26,7 +26,8 @@ function ctrl_c() {
 trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
-(cd $TMPDIR && git clone https://github.com/u-root/u-root)
+# Checkout before 1.20+ was required.
+(cd $TMPDIR && git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
 (cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 254af2bf3c82ff9f56e89794b2c146ef9cc85dc6)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
@@ -61,11 +62,9 @@ function ctrl_c() {
 trap ctrl_c INT
 
 (cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
+(cd $GOPATH_TMPDIR/src/github.com/u-root/u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
 GOARCH=arm64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
-
-if grep -q -v "go1.13" <<< "$($GO version)"; then
-  GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
-fi
+GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
 
 rm -rf $GOPATH_TMPDIR bb3
