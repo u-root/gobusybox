@@ -61,8 +61,8 @@ function ctrl_c() {
 }
 trap ctrl_c INT
 
-(cd $GOPATH_TMPDIR && GOPATH=$GOPATH_TMPDIR GO111MODULE=off $GO get -u github.com/u-root/u-root)
-(cd $GOPATH_TMPDIR/src/github.com/u-root/u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
+mkdir -p $GOPATH_TMPDIR/src/github.com/u-root
+(cd $GOPATH_TMPDIR/src/github.com/u-root && git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
 GOARCH=arm64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
 GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
