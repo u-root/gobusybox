@@ -139,7 +139,7 @@ func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*p
 		for _, e := range p.Errors {
 			merr = errors.Join(merr, e)
 		}
-		return plist, fmt.Errorf("failed to add package %v for errors: %v", p, merr)
+		return plist, fmt.Errorf("failed to add package %v for errors: %w", p, merr)
 	} else if len(p.GoFiles) > 0 {
 		plist = append(plist, p)
 	}
