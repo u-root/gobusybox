@@ -15,7 +15,7 @@ determine which command is being called.
 
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
-| Go version | Tested are 1.18-1.21                                  |
+| Go version | Tested are 1.20-1.21                                  |
 | Packaging  | Go modules, Go vendoring                              |
 | `GOOS`     | linux (others may work, but untested)                 |
 | `GOARCH`   | amd64, arm, arm64, riscv64 (others may work, but untested) |
