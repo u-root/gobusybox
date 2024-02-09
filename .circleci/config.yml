@@ -22,6 +22,10 @@ templates:
     docker:
       - image: cimg/go:1.21
 
+  go122-template: &go122-template
+    docker:
+      - image: cimg/go:1.22
+
   build-gomod-template: &build-gomod-template
     steps:
       - checkout
@@ -89,12 +93,21 @@ workflows:
           requires:
             - clean-makebb
             - clean-gopath
+      - build-gopath-go122:
+          requires:
+            - clean-makebb
+            - clean-gopath
       - test-go120:
           requires:
             - clean-makebb
             - clean-gopath
             - clean-gomod
       - test-go121:
+          requires:
+            - clean-makebb
+            - clean-gopath
+            - clean-gomod
+      - test-go122:
           requires:
             - clean-makebb
             - clean-gopath
@@ -107,11 +120,19 @@ workflows:
           requires:
             - clean-makebb
             - clean-gomod
+      - build-gomod-go122:
+          requires:
+            - clean-makebb
+            - clean-gomod
       - build-gomod-multi-go120:
           requires:
             - clean-makebb
             - clean-gomod
       - build-gomod-multi-go121:
+          requires:
+            - clean-makebb
+            - clean-gomod
+      - build-gomod-multi-go122:
           requires:
             - clean-makebb
             - clean-gomod
@@ -126,16 +147,20 @@ workflows:
     jobs:
       - build-gopath-go120
       - build-gopath-go121
+      - build-gopath-go122
       - test-go120
       - test-go121
+      - test-go122
       - build-gomod-go120
       - build-gomod-go121
+      - build-gomod-go122
       - build-gomod-multi-go120
       - build-gomod-multi-go121
+      - build-gomod-multi-go122
 
 jobs:
   clean-makebb:
-    <<: [*go121-template, *gomod-template]
+    <<: [*go122-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -156,7 +181,7 @@ jobs:
             fi
 
   clean-gopath:
-    <<: [*go121-template, *gopath-template]
+    <<: [*go122-template, *gopath-template]
     steps:
       - checkout
       - run:
@@ -171,14 +196,20 @@ jobs:
   build-gopath-go121:
     <<: [*go121-template, *gopath-template, *build-gopath-template]
 
+  build-gopath-go122:
+    <<: [*go122-template, *gopath-template, *build-gopath-template]
+
   test-go120:
     <<: [*go120-template, *gopath-template, *test-template]
 
   test-go121:
     <<: [*go121-template, *gopath-template, *test-template]
 
+  test-go122:
+    <<: [*go122-template, *gopath-template, *test-template]
+
   clean-gomod:
-    <<: [*go121-template, *gomod-template]
+    <<: [*go122-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -235,8 +266,14 @@ jobs:
   build-gomod-go121:
     <<: [*go121-template, *gomod-template, *build-gomod-template]
 
+  build-gomod-go122:
+    <<: [*go122-template, *gomod-template, *build-gomod-template]
+
   build-gomod-multi-go120:
     <<: [*go120-template, *gomod-template, *build-gomod-multi-template]
 
   build-gomod-multi-go121:
     <<: [*go121-template, *gomod-template, *build-gomod-multi-template]
+
+  build-gomod-multi-go122:
+    <<: [*go122-template, *gomod-template, *build-gomod-multi-template]
