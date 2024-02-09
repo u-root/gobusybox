@@ -16,7 +16,7 @@ determine which command is being called.
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
 | Go version | Tested are 1.18-1.21                                  |
-| Packaging  | Go modules, Go vendoring, bazel w/ [rules_go](https\://github.com/bazelbuild/rules_go) |
+| Packaging  | Go modules, Go vendoring                              |
 | `GOOS`     | linux (others may work, but untested)                 |
 | `GOARCH`   | amd64, arm, arm64, riscv64 (others may work, but untested) |
 | CGO        | *Not supported*                                       |
@@ -156,49 +156,7 @@ makebb \
 ## APIs
 
 Besides the makebb CLI command, there is a
-[Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb)
-and bazel rules in [src/gobb2.bzl](src/gobb2.bzl).
-
-### Using bazel go_busybox rule
-
-Assuming you have [rules_go](https://github.com/bazelbuild/rules_go) set up, add
-the following to your `WORKSPACE`:
-
-```bzl
-git_repository(
-    name = "com_github_u_root_gobusybox",
-
-    # We do not have regular releases yet.
-    #
-    # We also do not guarantee compatibility yet, so it may be worth choosing a
-    # commit and setting `commit = "hash"` here instead of the branch.
-    branch = "main",
-    remote = "https://github.com/u-root/gobusybox.git",
-)
-```
-
-Then, in any `BUILD` file, you can create a busybox like this:
-
-```bzl
-load("@com_github_u_root_gobusybox//src:gobb2.bzl", "go_busybox")
-
-go_busybox(
-    name = "bb",
-    cmds = [
-        # These must be absolute labels, for the moment, and each command must
-        # be listed individually. (No :... or :all target patterns.)
-        "//cmd/foobar",
-        "//cmd/otherbar",
-
-        # Another repository's go_binarys are totally fine, e.g. if imported
-        # with gazelle's go_repository rule.
-        "@com_github_u-root_u-root//cmds/core/ls",
-    ],
-)
-```
-
-For the moment, the targets listed on `cmds` must be **individual, absolute
-labels** (issue [#38](https://github.com/u-root/gobusybox/issues/38)).
+[Go API at src/pkg/bb](https://pkg.go.dev/github.com/u-root/gobusybox/src/pkg/bb).
 
 ## Shortcomings
 
@@ -381,7 +339,7 @@ func main() {
 This would be rewritten to be:
 
 ```go
-package sl // based on the directory name or bazel-rule go_binary name
+package sl // based on the directory name
 
 import (
   "flag"

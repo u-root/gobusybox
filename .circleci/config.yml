@@ -30,14 +30,6 @@ templates:
     docker:
       - image: cimg/go:1.21
 
-  bazel-template: &bazel-template
-    docker:
-      - image: cimg/go:1.21
-    working_directory: /home/circleci/go/bazel_gobusybox
-    environment:
-      - GOPATH: "/home/circleci/go"
-    resource_class: large
-
   build-gomod-template: &build-gomod-template
     steps:
       - checkout
@@ -97,10 +89,6 @@ workflows:
       - clean-gopath
       - clean-gomod
       - clean-makebb
-      - clean-bazel
-      - build-bazel
-      - build-bazel-cross
-      - build-bazel-test
       - build-gopath-go118:
           requires:
             - clean-makebb
@@ -194,9 +182,6 @@ workflows:
       - build-gomod-multi-go119
       - build-gomod-multi-go120
       - build-gomod-multi-go121
-      - build-bazel
-      - build-bazel-cross
-      - build-bazel-test
 
 jobs:
   clean-makebb:
@@ -329,82 +314,3 @@ jobs:
 
   build-gomod-multi-go121:
     <<: [*go121-template, *gomod-template, *build-gomod-multi-template]
-
-  clean-bazel:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run: go install github.com/bazelbuild/bazelisk@latest
-      - run:
-          name: run gazelle
-          command: |
-            bazelisk run :gazelle
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `bazel run :gazelle` and then check in the changes'
-              git status --porcelain .
-              exit 1
-            fi
-      - run:
-          name: sync bazel deps.bzl with src/go.mod
-          command: |
-            bazelisk run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
-            git status
-            if [[ -n "$(git status --porcelain deps.bzl)" ]]; then
-              echo 'go.mod deps are out of sync with deps.bzl: run '
-              echo '  bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies'
-              echo 'and then check in the changes in deps.bzl'
-              git status --porcelain .
-              exit 1
-            fi
-
-      - run:
-          name: run buildifier
-          command: |
-            bazelisk run :buildifier -- -r .
-            # For some reason, running buildifier or gazelle updates go.sum.
-            git checkout -- src/go.sum
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `bazel run :buildifier -- -r .` and then check in the changes'
-              git status --porcelain .
-              exit 1
-            fi
-
-  build-bazel:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run: go install github.com/bazelbuild/bazelisk@latest
-      - run:
-          name: build busybox
-          command: |
-            bazelisk build //src:bb
-            ./bazel-bin/src/bb_/bb helloworld
-      - run:
-          name: build everything (amd64)
-          command: bazelisk build //src/...
-
-  build-bazel-cross:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run: go install github.com/bazelbuild/bazelisk@latest
-      - run:
-          name: bazel cross-compile
-          command: |
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:uroot_bb
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:uroot_bb
-            bazelisk build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:bb
-
-  build-bazel-test:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run: go install github.com/bazelbuild/bazelisk@latest
-      - run:
-          name: bazel test
-          command: bazelisk query 'tests(//src/...) except attr(tags, notest, //src/...)' | xargs bazelisk test
