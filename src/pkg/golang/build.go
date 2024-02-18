@@ -88,8 +88,28 @@ func DisableCGO() Opt {
 
 // WithGOARCH is an option that overrides GOARCH.
 func WithGOARCH(goarch string) Opt {
+	if goarch == "" {
+		return nil
+	}
 	return func(c *Environ) {
 		c.GOARCH = goarch
+	}
+}
+
+// WithGOOS is an option that overrides GOOS.
+func WithGOOS(goos string) Opt {
+	if goos == "" {
+		return nil
+	}
+	return func(c *Environ) {
+		c.GOOS = goos
+	}
+}
+
+// WithBuildTag is an option that appends build tags.
+func WithBuildTag(tag ...string) Opt {
+	return func(c *Environ) {
+		c.BuildTags = append(c.BuildTags, tag...)
 	}
 }
 
