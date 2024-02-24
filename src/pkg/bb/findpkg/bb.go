@@ -416,6 +416,9 @@ func ResolveGlobs(logger ulog.Logger, genv *golang.Environ, env Env, patterns []
 
 	paths, err := filterGoPaths(logger, genv, env.WorkingDirectory, includes, excludes)
 	if err != nil {
+		if strings.Contains(err.Error(), "go.mod file not found") {
+			return nil, fmt.Errorf("%w: gobusybox has removed previous multi-module functionality in favor of Go workspaces -- read https://github.com/u-root/gobusybox#path-resolution--multi-module-builds for more", err)
+		}
 		return nil, err
 	}
 
