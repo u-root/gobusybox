@@ -1,0 +1,73 @@
+name: Go
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    # Every day at 8am.
+    - cron: "0 8 * * *"
+
+# Cancel running workflows on new push to a PR.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tidy:
+    name: Tidy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.22.x'
+
+      - name: gofmt
+        run: cd src && test -z "$(gofmt -s -l $(find -name '*.go'))"
+
+      - name: go mod tidy
+        run: |
+          cd src
+          go mod tidy
+          git status
+          if [[ -n "$(git status --porcelain .)" ]]; then
+            echo 'go.mod/go.sum is out-of-date: run `go mod tidy` and then check in the changes'
+            echo 'If `go mod tidy` results in no changes, make sure you are using the latest relase of Go'
+            git status --porcelain .
+            exit 1
+          fi
+
+  unit-test:
+    name: Unit Test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goversion: ['1.20', '1.21.x', '1.22.x']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: go/src/github.com/u-root/gobusybox
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.goversion }}
+
+      - name: Test
+        run: |
+          cd go/src/github.com/u-root/gobusybox/src
+          # Unit tests cover both GO111MODULE=on and off cases.
+          GOPATH=$GITHUB_WORKSPACE/go go test -covermode=atomic -coverprofile cover.out ./...
+
+      - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
+        env:
+          CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
+        with:
+          working-directory: go/src/github.com/u-root/gobusybox
+          flags: ${{ matrix.goversion }}
+          fail_ci_if_error: true
+          verbose: true
+
