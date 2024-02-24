@@ -26,25 +26,6 @@ templates:
     docker:
       - image: cimg/go:1.22
 
-  build-gomod-template: &build-gomod-template
-    steps:
-      - checkout
-      - run:
-          name: individual commands & packages build
-          command: |
-            (cd src && go build ./...)
-            (cd test/diamonddep/mod1 && go build ./...)
-            # test/diamonddep/mod2 doesn't build on its own due to mutual
-            # dependency.
-            (cd test/diamonddep/mod3 && go build ./...)
-            (cd test/normaldeps/mod1 && go build ./...)
-            (cd test/normaldeps/mod2 && go build ./...)
-            (cd test/nested && go build ./...)
-            (cd test/nested/nestedmod && go build ./...)
-      - run:
-          name: tests
-          command: ./gobuilds.sh
-
   build-gomod-multi-template: &build-gomod-multi-template
     steps:
       - checkout
@@ -62,18 +43,6 @@ workflows:
       - clean-gopath
       - clean-gomod
       - clean-makebb
-      - build-gomod-go120:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-go121:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-go122:
-          requires:
-            - clean-makebb
-            - clean-gomod
       - build-gomod-multi-go120:
           requires:
             - clean-makebb
@@ -95,9 +64,6 @@ workflows:
               only:
                 - main
     jobs:
-      - build-gomod-go120
-      - build-gomod-go121
-      - build-gomod-go122
       - build-gomod-multi-go120
       - build-gomod-multi-go121
       - build-gomod-multi-go122
@@ -181,15 +147,6 @@ jobs:
           command: |
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
-
-  build-gomod-go120:
-    <<: [*go120-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go121:
-    <<: [*go121-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go122:
-    <<: [*go122-template, *gomod-template, *build-gomod-template]
 
   build-gomod-multi-go120:
     <<: [*go120-template, *gomod-template, *build-gomod-multi-template]
