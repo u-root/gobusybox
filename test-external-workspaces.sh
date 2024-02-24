@@ -9,8 +9,7 @@ fi
 
 cd src/cmd/makebb
 
-$GO generate
-$GO build
+$GO build -covermode=atomic
 
 cd ../../..
 
