@@ -38,6 +38,18 @@ type Environ struct {
 	GBBDEBUG    bool
 }
 
+// Copy makes a copy of Environ with the given changes.
+func (c *Environ) Copy(opts ...Opt) *Environ {
+	e := &Environ{
+		Context:     c.Context,
+		GO111MODULE: c.GO111MODULE,
+		Mod:         c.Mod,
+		GBBDEBUG:    c.GBBDEBUG,
+	}
+	e.Apply(opts...)
+	return e
+}
+
 // RegisterFlags registers flags for Environ.
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
 	arg := (*uflag.Strings)(&c.BuildTags)
@@ -131,6 +143,13 @@ func WithGOROOT(goroot string) Opt {
 func WithGO111MODULE(go111module string) Opt {
 	return func(c *Environ) {
 		c.GO111MODULE = go111module
+	}
+}
+
+// WithMod is an option that overrides module behavior.
+func WithMod(mod ModBehavior) Opt {
+	return func(c *Environ) {
+		c.Mod = mod
 	}
 }
 
