@@ -39,23 +39,21 @@ templates:
             (cd test/diamonddep/mod3 && go build ./...)
             (cd test/normaldeps/mod1 && go build ./...)
             (cd test/normaldeps/mod2 && go build ./...)
-            (cd test/requestconflict/mod5 && go build ./...)
-            (cd test/requestconflict/mod6 && go build ./...)
             (cd test/nested && go build ./...)
             (cd test/nested/nestedmod && go build ./...)
       - run:
           name: tests
           command: ./gobuilds.sh
-      - run:
-          name: build gokrazy & p9 together
-          command: ./test-multi-simple.sh
 
   build-gomod-multi-template: &build-gomod-multi-template
     steps:
       - checkout
       - run:
-          name: build u-root & gokrazy & p9 together
+          name: build u-root & gokrazy & p9 together (workspaces)
           command: ./test-external.sh
+      - run:
+          name: build u-root & cpu & p9 together (GOPATH)
+          command: ./test-external-gopath.sh
 
   build-gopath-template: &build-gopath-template
     steps:
@@ -227,8 +225,6 @@ jobs:
             (cd test/goembed && go mod tidy && go mod verify)
             (cd test/normaldeps/mod1 && go mod tidy && go mod verify)
             (cd test/normaldeps/mod2 && go mod tidy && go mod verify)
-            (cd test/requestconflict/mod5 && go mod tidy && go mod verify)
-            (cd test/requestconflict/mod6 && go mod tidy && go mod verify)
             (cd test/nested && go mod tidy && go mod verify)
             (cd test/nested/nestedmod && go mod tidy && go mod verify)
             git status
@@ -250,8 +246,6 @@ jobs:
             (cd test/goembed && go vet ./...)
             (cd test/normaldeps/mod1 && go vet ./...)
             (cd test/normaldeps/mod2 && go vet ./...)
-            (cd test/requestconflict/mod5 && go vet ./...)
-            (cd test/requestconflict/mod6 && go vet ./...)
             (cd test/nested && go vet ./...)
             (cd test/nested/nestedmod && go vet ./...)
       - run:

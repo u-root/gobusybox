@@ -30,6 +30,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"golang.org/x/exp/maps"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 
@@ -38,14 +39,6 @@ import (
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
 )
-
-func listStrings(m map[string]struct{}) []string {
-	var l []string
-	for k := range m {
-		l = append(l, k)
-	}
-	return l
-}
 
 func checkDuplicate(cmds []*bbinternal.Package) error {
 	seen := make(map[string]string)
@@ -187,7 +180,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		}
 	}
 	if len(modules) > 0 && numNoModule > 0 {
-		return fmt.Errorf("gobusybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(listStrings(modules), ", "))
+		return fmt.Errorf("gobusybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(maps.Keys(modules), ", "))
 	}
 
 	// List of packages to import in the real main file.
@@ -286,17 +279,6 @@ func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
 		return fmt.Errorf("creating bb main.go file failed: %v", err)
 	}
 	return nil
-}
-
-func isReplacedModuleLocal(m *packages.Module) bool {
-	// From "replace directive": https://golang.org/ref/mod#go
-	//
-	//   If the path on the right side of the arrow is an absolute or
-	//   relative path (beginning with ./ or ../), it is interpreted as the
-	//   local file path to the replacement module root directory, which
-	//   must contain a go.mod file. The replacement version must be
-	//   omitted in this case.
-	return strings.HasPrefix(m.Path, "./") || strings.HasPrefix(m.Path, "../") || strings.HasPrefix(m.Path, "/")
 }
 
 func copyAllDeps(l ulog.Logger, env *golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
