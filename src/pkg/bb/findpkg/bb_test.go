@@ -23,63 +23,6 @@ var (
 	urootSource = flag.String("uroot-source", "", "Directory path to u-root source location")
 )
 
-func TestModules(t *testing.T) {
-	dir, err := ioutil.TempDir("", "test-modules-")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(dir)
-
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd1"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd2"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd3"), 0755)
-	os.MkdirAll(filepath.Join(dir, "mod2/cmd/cmd4"), 0755)
-	os.MkdirAll(filepath.Join(dir, "nomod/cmd/cmd7"), 0755)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod1/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod1/nestedmod2/go.mod"), nil, 0644)
-	ioutil.WriteFile(filepath.Join(dir, "mod2/go.mod"), nil, 0644)
-
-	paths := []string{
-		filepath.Join(dir, "mod1/cmd/cmd1"),
-		filepath.Join(dir, "mod1/cmd/cmd2"),
-		filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"),
-		filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"),
-		filepath.Join(dir, "mod2/cmd/cmd3"),
-		filepath.Join(dir, "mod2/cmd/cmd4"),
-		filepath.Join(dir, "nomod/cmd/cmd7"),
-	}
-	mods, noModulePkgs := modules(paths)
-
-	want := map[string][]string{
-		filepath.Join(dir, "mod1"): {
-			filepath.Join(dir, "mod1/cmd/cmd1"),
-			filepath.Join(dir, "mod1/cmd/cmd2"),
-		},
-		filepath.Join(dir, "mod1/nestedmod1"): {
-			filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"),
-		},
-		filepath.Join(dir, "mod1/nestedmod2"): {
-			filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"),
-		},
-		filepath.Join(dir, "mod2"): {
-			filepath.Join(dir, "mod2/cmd/cmd3"),
-			filepath.Join(dir, "mod2/cmd/cmd4"),
-		},
-	}
-	if !reflect.DeepEqual(mods, want) {
-		t.Errorf("modules() = %v, want %v", mods, want)
-	}
-	wantNoModule := []string{
-		filepath.Join(dir, "nomod/cmd/cmd7"),
-	}
-	if !reflect.DeepEqual(noModulePkgs, wantNoModule) {
-		t.Errorf("modules() no module pkgs = %v, want %v", noModulePkgs, wantNoModule)
-	}
-}
-
 type testCase struct {
 	// name of the test case
 	name string
@@ -129,7 +72,7 @@ func TestResolve(t *testing.T) {
 	if err := os.Mkdir("./test/resolvebroken", 0777); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll("./test/resolvebroken")
+	t.Cleanup(func() { _ = os.RemoveAll("./test/resolvebroken") })
 	if err := ioutil.WriteFile("./test/resolvebroken/main.go", []byte("broken"), 0777); err != nil {
 		t.Fatal(err)
 	}
@@ -137,7 +80,7 @@ func TestResolve(t *testing.T) {
 	if err := os.Mkdir("./test/parsebroken", 0777); err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll("./test/parsebroken")
+	t.Cleanup(func() { _ = os.RemoveAll("./test/parsebroken") })
 	if err := ioutil.WriteFile("./test/parsebroken/main.go", []byte("package main\n\nimport \"fmt\""), 0777); err != nil {
 		t.Fatal(err)
 	}
@@ -153,39 +96,34 @@ func TestResolve(t *testing.T) {
 		},
 		// Single package, file system path.
 		{
-			name:        "fspath-single",
-			in:          []string{filepath.Join(gbbmod, "cmd/makebb")},
-			want:        []string{filepath.Join(gbbmod, "cmd/makebb")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			name: "fspath-single",
+			in:   []string{filepath.Join(gbbmod, "cmd/makebb")},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
 		},
 		// Single package, file system path, GBB_PATHS.
 		{
-			name:        "fspath-gbbpath-single",
-			gbbPath:     []string{gbbmod},
-			in:          []string{"cmd/makebb"},
-			want:        []string{filepath.Join(gbbmod, "cmd/makebb")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			name:    "fspath-gbbpath-single",
+			gbbPath: []string{gbbmod},
+			in:      []string{"cmd/makebb"},
+			want:    []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
 		},
 		// Single package, Go package path.
 		{
-			name:        "pkgpath-single",
-			in:          []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
-			want:        []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			name: "pkgpath-single",
+			in:   []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
 		},
 		// Two packages, globbed file system path.
 		{
-			name:        "fspath-glob",
-			in:          []string{filepath.Join(gbbmod, "cmd/make*")},
-			want:        []string{filepath.Join(gbbmod, "cmd/makebb"), filepath.Join(gbbmod, "cmd/makebbmain")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
+			name: "fspath-glob",
+			in:   []string{filepath.Join(gbbmod, "cmd/make*")},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
 		},
 		// Two packages, globbed Go package path.
 		{
-			name:        "pkgpath-glob",
-			in:          []string{"github.com/u-root/gobusybox/src/cmd/make*"},
-			want:        []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
+			name: "pkgpath-glob",
+			in:   []string{"github.com/u-root/gobusybox/src/cmd/make*"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
 		},
 		// Globbed file system path of non-existent packages.
 		{
@@ -203,17 +141,15 @@ func TestResolve(t *testing.T) {
 		},
 		// Two packages (file system paths), one excluded by build constraints.
 		{
-			name:        "fspath-log-buildconstrained",
-			in:          []string{"./test/buildconstraint", filepath.Join(gbbmod, "cmd/makebb")},
-			want:        []string{filepath.Join(gbbmod, "cmd/makebb")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			name: "fspath-log-buildconstrained",
+			in:   []string{"./test/buildconstraint", filepath.Join(gbbmod, "cmd/makebb")},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
 		},
 		// Two packages (Go package paths), one excluded by build constraints.
 		{
-			name:        "pkgpath-log-buildconstrained",
-			in:          []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/buildconstraint", "github.com/u-root/gobusybox/src/cmd/makebb"},
-			want:        []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
+			name: "pkgpath-log-buildconstrained",
+			in:   []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/buildconstraint", "github.com/u-root/gobusybox/src/cmd/makebb"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb"},
 		},
 		// Package excluded by build constraints (file system paths).
 		{
@@ -237,20 +173,12 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
 				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
 			},
-			wantPkgPath: []string{
-				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
-				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
-			},
 		},
 		// Go glob support (relative Go package path).
 		{
 			name: "pkgpath-relative-go-glob",
 			in:   []string{"./test/goglob/..."},
 			want: []string{
-				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
-				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
-			},
-			wantPkgPath: []string{
 				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo",
 				"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo",
 			},
@@ -277,6 +205,7 @@ func TestResolve(t *testing.T) {
 			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/empty"},
 			wantErr: true,
 		},
+		// resolvebroken is not compilable.
 		{
 			name:    "fspath-broken-go",
 			in:      []string{"./test/resolvebroken"},
@@ -287,6 +216,7 @@ func TestResolve(t *testing.T) {
 			in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/resolvebroken"},
 			wantErr: true,
 		},
+		// Contains test/resolvebroken which is not compilable.
 		{
 			name:    "fspath-glob-with-errors",
 			in:      []string{"./test/*"},
@@ -317,26 +247,26 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/u-root/cmds/core/init",
 				"github.com/u-root/u-root/cmds/core/ip",
 			},
-			wantPkgPath: []string{
-				"github.com/hugelgupf/p9/cmd/p9ufs",
-				"github.com/u-root/u-root/cmds/core/dhclient",
-				"github.com/u-root/u-root/cmds/core/init",
-				"github.com/u-root/u-root/cmds/core/ip",
-			},
 		},
+		// TODO: vendored multi module?
+
 		// Exclusion, single package, file system path.
 		{
-			name:        "fspath-exclusion",
-			in:          []string{"./test/goglob/*", "-test/goglob/echo"},
-			want:        []string{filepath.Join(gbbmod, "pkg/bb/findpkg/test/goglob/foo")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
+			name: "fspath-exclusion",
+			in:   []string{"./test/goglob/*", "-test/goglob/echo"},
+			want: []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
 		},
 		// Exclusion, single package, Go package path.
 		{
-			name:        "pkgpath-exclusion",
-			in:          []string{"./test/goglob/...", "-github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo"},
-			want:        []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
+			name: "pkgpath-exclusion",
+			in:   []string{"./test/goglob/...", "-github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/echo"},
+			want: []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
+		},
+		// Exclusion, single package, mixed.
+		{
+			name: "path-exclusion",
+			in:   []string{"./test/goglob/...", "-test/goglob/echo"},
+			want: []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/goglob/foo"},
 		},
 		// Globs in exclusions should work.
 		//
@@ -358,25 +288,19 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/u-root/cmds/core/init",
 				"github.com/u-root/u-root/cmds/core/ip",
 			},
-			wantPkgPath: []string{
-				"github.com/hugelgupf/p9/cmd/p9ufs",
-				"github.com/u-root/u-root/cmds/core/init",
-				"github.com/u-root/u-root/cmds/core/ip",
-			},
+		},
+		// Old-style GOPATH resolution.
+		{
+			name: "fspath-nomodule",
+			envs: []*golang.Environ{moduleOffEnv},
+			in:   []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
+			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 		},
 		{
-			name:        "fspath-nomodule",
-			envs:        []*golang.Environ{moduleOffEnv},
-			in:          []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
-			want:        []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-		},
-		{
-			name:        "pkgpath-nomodule",
-			envs:        []*golang.Environ{moduleOffEnv},
-			in:          []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-			want:        []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-			wantPkgPath: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
+			name: "pkgpath-nomodule",
+			envs: []*golang.Environ{moduleOffEnv},
+			in:   []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
+			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
 		},
 		// File system path. Not a directory.
 		{
@@ -409,100 +333,7 @@ func TestResolve(t *testing.T) {
 		*/
 	}
 
-	// test cases that depend on external repositories.
-	//
-	// For NewPackages, these are only run with GO111MODULE=on so we don't
-	// have to get all the deps and put them in GOPATH for this test.
-	externalDepCases := []testCase{
-		// GBB_PATHS, file system paths, non-Gobusybox module.
-		{
-			name:    "fspath-gbbpath-uroot-outside-module",
-			gbbPath: []string{urootSrc},
-			in: []string{
-				"cmds/core/ip",
-				"cmds/core/dhclient",
-			},
-			want: []string{
-				filepath.Join(urootSrc, "cmds/core/dhclient"),
-				filepath.Join(urootSrc, "cmds/core/ip"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/u-root/cmds/core/dhclient",
-				"github.com/u-root/u-root/cmds/core/ip",
-			},
-		},
-		// UROOT_SOURCE, file system paths, non-Gobusybox module.
-		{
-			name:        "fspath-uroot-source",
-			urootSource: urootSrc,
-			in: []string{
-				"cmds/core/ip",
-				"github.com/u-root/u-root/cmds/core/dhclient",
-			},
-			want: []string{
-				filepath.Join(urootSrc, "cmds/core/dhclient"),
-				filepath.Join(urootSrc, "cmds/core/ip"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/u-root/cmds/core/dhclient",
-				"github.com/u-root/u-root/cmds/core/ip",
-			},
-		},
-		// UROOT_SOURCE, file system paths, glob, non-Gobusybox module.
-		{
-			name:        "fspath-uroot-source-glob",
-			urootSource: urootSrc,
-			in: []string{
-				"cmds/core/n*",
-				"github.com/u-root/u-root/cmds/core/y*",
-			},
-			want: []string{
-				filepath.Join(urootSrc, "cmds/core/netcat"),
-				filepath.Join(urootSrc, "cmds/core/ntpdate"),
-				filepath.Join(urootSrc, "cmds/core/yes"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/u-root/cmds/core/netcat",
-				"github.com/u-root/u-root/cmds/core/ntpdate",
-				"github.com/u-root/u-root/cmds/core/yes",
-			},
-		},
-		// Finding packages in more than 1 module, file system paths.
-		{
-			name: "fspath-multi-module",
-			in: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			want: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/gobusybox/src/cmd/makebb",
-				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
-			},
-		},
-		// Finding packages in more than 1 module, file system paths, GBB_PATHS support.
-		{
-			name:    "fspath-gbbpath-multi-module",
-			gbbPath: []string{gbbmod, gbbroot},
-			in: []string{
-				"cmd/makebb",
-				"test/normaldeps/mod1/cmd/getppid",
-			},
-			want: []string{
-				filepath.Join(gbbmod, "cmd/makebb"),
-				filepath.Join(gbbroot, "test/normaldeps/mod1/cmd/getppid"),
-			},
-			wantPkgPath: []string{
-				"github.com/u-root/gobusybox/src/cmd/makebb",
-				"github.com/u-root/gobusybox/test/normaldeps/mod1/cmd/getppid",
-			},
-		},
-	}
-
-	for _, tc := range append(sharedTestCases, externalDepCases...) {
+	for _, tc := range sharedTestCases {
 		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
@@ -550,7 +381,6 @@ func TestResolve(t *testing.T) {
 		in:      []string{"github.com/u-root/gobusybox/src/pkg/bb/findpkg/test/parsebroken"},
 		wantErr: true,
 	})
-	newPkgTests = append(newPkgTests, testCasesWithEnv([]*golang.Environ{moduleOnEnv}, externalDepCases...)...)
 	for _, tc := range newPkgTests {
 		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
 		if tc.envs != nil {
@@ -576,23 +406,13 @@ func TestResolve(t *testing.T) {
 					pkgPaths = append(pkgPaths, p.Pkg.PkgPath)
 				}
 				sort.Strings(pkgPaths)
-				if !reflect.DeepEqual(pkgPaths, tc.wantPkgPath) {
-					t.Errorf("NewPackages(%v, %v) = %v; want %v", e, tc.in, out, tc.wantPkgPath)
+				if !reflect.DeepEqual(pkgPaths, tc.want) {
+					t.Errorf("NewPackages(%v, %v) = %v; want %v", e, tc.in, out, tc.want)
 				}
 			})
 
 		}
 	}
-}
-
-func testCasesWithEnv(envs []*golang.Environ, tcs ...testCase) []testCase {
-	var newTCs []testCase
-	for _, tc := range tcs {
-		newTC := tc
-		newTC.envs = envs
-		newTCs = append(newTCs, newTC)
-	}
-	return newTCs
 }
 
 func TestDefaultEnv(t *testing.T) {
