@@ -146,6 +146,13 @@ func WithMod(mod ModBehavior) Opt {
 	}
 }
 
+// WithWorkingDir sets the working directory for calls to `go`.
+func WithWorkingDir(wd string) Opt {
+	return func(c *Environ) {
+		c.Dir = wd
+	}
+}
+
 // Default is the default build environment comprised of the default GOPATH,
 // GOROOT, GOOS, GOARCH, and CGO_ENABLED values.
 func Default(opts ...Opt) *Environ {
@@ -168,11 +175,11 @@ func (c *Environ) Apply(opts ...Opt) {
 }
 
 // Lookup looks up packages by patterns relative to dir, using the Go environment from c.
-func (c *Environ) Lookup(mode packages.LoadMode, dir string, patterns ...string) ([]*packages.Package, error) {
+func (c *Environ) Lookup(mode packages.LoadMode, patterns ...string) ([]*packages.Package, error) {
 	cfg := &packages.Config{
 		Mode: mode,
 		Env:  append(os.Environ(), c.Env()...),
-		Dir:  dir,
+		Dir:  c.Dir,
 	}
 	if len(c.Context.BuildTags) > 0 {
 		tags := fmt.Sprintf("-tags=%s", strings.Join(c.Context.BuildTags, ","))
@@ -192,6 +199,7 @@ func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
 	if c.GBBDEBUG {
 		log.Printf("GBB Go invocation: %s %s %#v", c, goBin, args)
 	}
+	cmd.Dir = c.Dir
 	cmd.Env = append(os.Environ(), c.Env()...)
 	return cmd
 }
