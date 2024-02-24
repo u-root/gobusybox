@@ -14,10 +14,14 @@ $GO build
 
 cd ../../..
 
+MAKEBB=$(pwd)/src/cmd/makebb/makebb
 TMPDIR=$(mktemp -d)
 EMPTY_TMPDIR=$(mktemp -d)
 
+pushd $TMPDIR
+
 function ctrl_c() {
+  popd
   rm -rf $TMPDIR
   # https://github.com/golang/go/issues/27455
   GOPATH=$EMPTY_TMPDIR $GO clean -cache -modcache
@@ -27,44 +31,38 @@ trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
 # Checkout before 1.20+ was required.
-(cd $TMPDIR && git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
+(git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
-(cd $TMPDIR && git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 254af2bf3c82ff9f56e89794b2c146ef9cc85dc6)
+(git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 254af2bf3c82ff9f56e89794b2c146ef9cc85dc6)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
-(cd $TMPDIR && git clone https://github.com/hugelgupf/p9 && cd p9 && git checkout 660eb2337e3c1878298fe550ad03248f329eeb72)
+(git clone https://github.com/hugelgupf/p9 && cd p9 && git checkout 660eb2337e3c1878298fe550ad03248f329eeb72)
 
-# Make u-root have modules.
-(cd $TMPDIR/u-root && rm -rf vendor)
+# Test workspaces.
+go work init ./u-root && go work use ./gokrazy && go work use ./p9
 
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=auto ./src/cmd/makebb/makebb -o bb1 $TMPDIR/u-root/cmds/*/*
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb -o bb2 $TMPDIR/u-root/cmds/*/*
+# Test reproducible builds.
+echo $TMPDIR
+echo $(pwd)
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly -o bb1 ./u-root/cmds/*/*
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly -o bb2 ./u-root/cmds/*/*
 
 cmp bb1 bb2 || (echo "building u-root is not reproducible" && exit 1)
 rm bb1 bb2
 
-GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
-GOARCH=arm64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+GOARCH=amd64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly ./u-root/cmds/*/* ./gokrazy/cmd/* ./p9/cmd/*
+GOARCH=arm64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly ./u-root/cmds/*/* ./gokrazy/cmd/* ./p9/cmd/*
+GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly ./u-root/cmds/*/* ./gokrazy/cmd/* ./p9/cmd/*
 
-if grep -q -v "go1.13" <<< "$($GO version)"; then
-  GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on ./src/cmd/makebb/makebb $TMPDIR/u-root/cmds/*/* $TMPDIR/gokrazy/cmd/* $TMPDIR/p9/cmd/*
+# Try an offline build in go workspaces.
+# go work vendor is a Go 1.22 feature.
+if grep -q -v "go1.21" <<< "$($GO version)" && grep -q -v "go1.20" <<< "$($GO version)";
+then
+  go work vendor
+  GOARCH=amd64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=vendor ./u-root/cmds/*/* ./gokrazy/cmd/* ./p9/cmd/*
 fi
 
+popd
 rm -rf $TMPDIR
 # https://github.com/golang/go/issues/27455
 GOPATH=$EMPTY_TMPDIR $GO clean -cache -modcache
 rm -rf $EMPTY_TMPDIR
-
-# Try vendor-based $GOPATH u-root.
-GOPATH_TMPDIR=$(mktemp -d)
-function ctrl_c() {
-  rm -rf $GOPATH_TMPDIR
-}
-trap ctrl_c INT
-
-mkdir -p $GOPATH_TMPDIR/src/github.com/u-root
-(cd $GOPATH_TMPDIR/src/github.com/u-root && git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
-GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
-GOARCH=arm64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
-GOARCH=riscv64 GOROOT=$GOROOT GOPATH=$GOPATH_TMPDIR GO111MODULE=off ./src/cmd/makebb/makebb -o bb3 $GOPATH_TMPDIR/src/github.com/u-root/u-root/cmds/*/*
-
-rm -rf $GOPATH_TMPDIR bb3
