@@ -27,8 +27,11 @@ untested.
 An example:
 
 ```bash
-(cd ./src/cmd/makebb && go install)
-(cd ./test/nested && makebb ./cmd/dmesg ./cmd/strace)
+go install github.com/u-root/gobusybox/cmd/makebb@latest
+
+git clone github.com/u-root/u-root
+cd u-root
+makebb ./cmds/core/dmesg ./cmds/core/strace
 ```
 
 A binary named `bb` should appear. It can be invoked in one of two ways --
@@ -62,12 +65,12 @@ mkdir workspace
 cd workspace
 
 git clone https://github.com/hugelgupf/p9
-git clone https://github.com/gokrazy/gokrazy
+git clone https://github.com/u-root/cpu
 
 go work init ./p9
-go work use ./gokrazy
+go work use ./cpu
 
-makebb ./p9/cmd/* ./gokrazy/cmd/*
+makebb ./cpu/cmds/* ./p9/cmd/*
 ```
 
 > [!IMPORTANT]
@@ -108,15 +111,15 @@ mkdir workspace
 cd workspace
 
 git clone https://github.com/u-root/u-root
-git clone https://github.com/u-root/u-bmc
+git clone https://github.com/u-root/cpu
 
 go work init ./u-root
-go work use ./u-bmc
+go work use ./cpu
 
 makebb \
     ./u-root/cmds/core/init \
     ./u-root/cmds/core/elvish \
-    ./u-bmc/cmd/socreset
+    ./cpu/cmds/cpud
 
 # Also works for offline builds with `go work vendor` (Go 1.22 feature):
 go work vendor
@@ -124,7 +127,7 @@ go work vendor
 makebb \
     ./u-root/cmds/core/init \
     ./u-root/cmds/core/elvish \
-    ./u-bmc/cmd/socreset
+    ./cpu/cmds/cpud
 ```
 
 For a shortcut to specify many commands sharing common path elements (e.g. from
@@ -133,15 +136,15 @@ concatenated with every colon-separated element of `GBB_PATH` from left to right
 and checked for existence.
 
 ```shell
-GBB_PATH=$(pwd)/u-root:$(pwd)/u-bmc makebb \
+GBB_PATH=$(pwd)/u-root:$(pwd)/cpu makebb \
     cmds/core/init \
     cmds/core/elvish \
-    cmd/socreset
+    cmds/cpud
 
 # matches:
 #   $(pwd)/u-root/cmds/core/init
 #   $(pwd)/u-root/cmds/core/elvish
-#   $(pwd)/u-bmc/cmd/socreset
+#   $(pwd)/cpu/cmds/cpud
 ```
 
 ### makebb with multiple Go modules
