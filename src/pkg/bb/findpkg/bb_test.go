@@ -339,11 +339,11 @@ func TestResolve(t *testing.T) {
 			envs = tc.envs
 		}
 		for _, env := range envs {
+			env = env.Copy(golang.WithWorkingDir(tc.wd))
 			t.Run(fmt.Sprintf("ResolveGlobs-GO111MODULE=%s-%s", env.GO111MODULE, tc.name), func(t *testing.T) {
 				e := Env{
-					GBBPath:          tc.gbbPath,
-					URootSource:      tc.urootSource,
-					WorkingDirectory: tc.wd,
+					GBBPath:     tc.gbbPath,
+					URootSource: tc.urootSource,
 				}
 				out, err := ResolveGlobs(l, env, e, tc.in)
 				if tc.err != nil && !errors.Is(err, tc.err) {
@@ -387,11 +387,11 @@ func TestResolve(t *testing.T) {
 			envs = tc.envs
 		}
 		for _, env := range envs {
+			env = env.Copy(golang.WithWorkingDir(tc.wd))
 			t.Run(fmt.Sprintf("NewPackage-GO111MODULE=%s-%s", env.GO111MODULE, tc.name), func(t *testing.T) {
 				e := Env{
-					GBBPath:          tc.gbbPath,
-					URootSource:      tc.urootSource,
-					WorkingDirectory: tc.wd,
+					GBBPath:     tc.gbbPath,
+					URootSource: tc.urootSource,
 				}
 				out, err := NewPackages(l, env, e, tc.in...)
 				if tc.err != nil && !errors.Is(err, tc.err) {
@@ -425,7 +425,7 @@ func TestDefaultEnv(t *testing.T) {
 		{
 			GBB_PATH:     "foo:bar",
 			UROOT_SOURCE: "./foo",
-			s:            "GBB_PATH=foo:bar UROOT_SOURCE=./foo PWD=",
+			s:            "GBB_PATH=foo:bar UROOT_SOURCE=./foo",
 			want: Env{
 				GBBPath:     []string{"foo", "bar"},
 				URootSource: "./foo",
@@ -433,13 +433,13 @@ func TestDefaultEnv(t *testing.T) {
 		},
 		{
 			GBB_PATH: "foo",
-			s:        "GBB_PATH=foo UROOT_SOURCE= PWD=",
+			s:        "GBB_PATH=foo UROOT_SOURCE=",
 			want: Env{
 				GBBPath: []string{"foo"},
 			},
 		},
 		{
-			s:    "GBB_PATH= UROOT_SOURCE= PWD=",
+			s:    "GBB_PATH= UROOT_SOURCE=",
 			want: Env{},
 		},
 	} {
