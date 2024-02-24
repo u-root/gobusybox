@@ -131,3 +131,59 @@ jobs:
           fail_ci_if_error: true
           verbose: true
 
+  test-external-workspaces:
+    name: test-external-workspaces
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goversion: ['1.20', '1.21.x', '1.22.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.goversion }}
+
+      - name: Test
+        run: |
+          mkdir cover
+          GOCOVERDIR=$(pwd)/cover ./test-external-workspaces.sh
+          go tool covdata textfmt -i=cover -o cover.out
+
+      - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
+        env:
+          CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
+        with:
+          flags: ${{ matrix.goversion }}
+          fail_ci_if_error: true
+          verbose: true
+
+  test-external-gopath:
+    name: test-external-gopath
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goversion: ['1.20', '1.21.x', '1.22.x']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.goversion }}
+
+      - name: Test
+        run: |
+          mkdir cover
+          GOCOVERDIR=$(pwd)/cover ./test-external-gopath.sh
+          go tool covdata textfmt -i=cover -o cover.out
+
+      - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
+        env:
+          CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
+        with:
+          flags: ${{ matrix.goversion }}
+          fail_ci_if_error: true
+          verbose: true
+

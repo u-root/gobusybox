@@ -14,27 +14,9 @@ templates:
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
 
-  go120-template: &go120-template
-    docker:
-      - image: cimg/go:1.20
-
-  go121-template: &go121-template
-    docker:
-      - image: cimg/go:1.21
-
   go122-template: &go122-template
     docker:
       - image: cimg/go:1.22
-
-  build-gomod-multi-template: &build-gomod-multi-template
-    steps:
-      - checkout
-      - run:
-          name: build u-root & gokrazy & p9 together (workspaces)
-          command: ./test-external.sh
-      - run:
-          name: build u-root & cpu & p9 together (GOPATH)
-          command: ./test-external-gopath.sh
 
 workflows:
   version: 2
@@ -43,30 +25,6 @@ workflows:
       - clean-gopath
       - clean-gomod
       - clean-makebb
-      - build-gomod-multi-go120:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go121:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go122:
-          requires:
-            - clean-makebb
-            - clean-gomod
-  nightly:
-    triggers:
-      - schedule:
-          cron: "0 0 * * *"
-          filters:
-            branches:
-              only:
-                - main
-    jobs:
-      - build-gomod-multi-go120
-      - build-gomod-multi-go121
-      - build-gomod-multi-go122
 
 jobs:
   clean-makebb:
@@ -148,11 +106,3 @@ jobs:
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
-  build-gomod-multi-go120:
-    <<: [*go120-template, *gomod-template, *build-gomod-multi-template]
-
-  build-gomod-multi-go121:
-    <<: [*go121-template, *gomod-template, *build-gomod-multi-template]
-
-  build-gomod-multi-go122:
-    <<: [*go122-template, *gomod-template, *build-gomod-multi-template]
