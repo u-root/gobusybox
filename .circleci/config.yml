@@ -55,16 +55,6 @@ templates:
           name: build u-root & cpu & p9 together (GOPATH)
           command: ./test-external-gopath.sh
 
-  build-gopath-template: &build-gopath-template
-    steps:
-      - checkout
-      - run:
-          name: go env
-          command: go env
-      - run:
-          name: gobuilds-gopath
-          command: ./gobuilds-gopath.sh
-
 workflows:
   version: 2
   build:
@@ -72,18 +62,6 @@ workflows:
       - clean-gopath
       - clean-gomod
       - clean-makebb
-      - build-gopath-go120:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go121:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go122:
-          requires:
-            - clean-makebb
-            - clean-gopath
       - build-gomod-go120:
           requires:
             - clean-makebb
@@ -117,9 +95,6 @@ workflows:
               only:
                 - main
     jobs:
-      - build-gopath-go120
-      - build-gopath-go121
-      - build-gopath-go122
       - build-gomod-go120
       - build-gomod-go121
       - build-gomod-go122
@@ -158,15 +133,6 @@ jobs:
           command: |
             cd vendortest
             test -z "$(gofmt -s -l $(find -name '*.go' | grep -v /vendor/))"
-
-  build-gopath-go120:
-    <<: [*go120-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go121:
-    <<: [*go121-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go122:
-    <<: [*go122-template, *gopath-template, *build-gopath-template]
 
   clean-gomod:
     <<: [*go122-template, *gomod-template]
