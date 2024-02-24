@@ -52,15 +52,8 @@ func (c *Environ) Copy(opts ...Opt) *Environ {
 
 // RegisterFlags registers flags for Environ.
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
-	arg := (*uflag.Strings)(&c.BuildTags)
-	f.Var(arg, "go-build-tags", "Go build tags")
-
-	mod := (*string)(&c.Mod)
-	defMod := ""
-	if c.GO111MODULE != "off" {
-		defMod = "readonly"
-	}
-	f.StringVar(mod, "go-mod", defMod, "Value of -mod to go commands (allowed: (empty), vendor, mod, readonly)")
+	f.Var((*uflag.Strings)(&c.BuildTags), "go-build-tags", "Go build tags")
+	f.StringVar((*string)(&c.Mod), "go-mod", string(c.Mod), "Value of -mod to go commands (allowed: (empty), vendor, mod, readonly)")
 }
 
 // Valid returns an error if GOARCH, GOROOT, or GOOS are unset.
@@ -160,10 +153,6 @@ func Default(opts ...Opt) *Environ {
 		Context:     build.Default,
 		GO111MODULE: os.Getenv("GO111MODULE"),
 		GBBDEBUG:    parseBool(os.Getenv("GBBDEBUG")),
-	}
-
-	if env.GO111MODULE != "off" {
-		env.Mod = ModReadonly
 	}
 	env.Apply(opts...)
 	return env
@@ -300,8 +289,7 @@ func (b *BuildOpts) RegisterFlags(f *flag.FlagSet) {
 	f.BoolVar(&b.NoStrip, "go-no-strip", false, "Do not strip symbols & Build ID from the binary (will not produce a reproducible binary)")
 	f.BoolVar(&b.EnableInlining, "go-enable-inlining", false, "Enable inlining (will likely produce a larger binary)")
 	f.BoolVar(&b.NoTrimPath, "go-no-trimpath", false, "Disable -trimpath (will not produce a reproducible binary)")
-	arg := (*uflag.Strings)(&b.ExtraArgs)
-	f.Var(arg, "go-extra-args", "Extra args to 'go build'")
+	f.Var((*uflag.Strings)(&b.ExtraArgs), "go-extra-args", "Extra args to 'go build'")
 }
 
 // BuildDir compiles the package in the directory `dirPath`, writing the build
