@@ -6,7 +6,6 @@ package findpkg
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io/ioutil"
 	"os"
@@ -19,10 +18,6 @@ import (
 	"github.com/u-root/uio/ulog/ulogtest"
 )
 
-var (
-	urootSource = flag.String("uroot-source", "", "Directory path to u-root source location")
-)
-
 type testCase struct {
 	// name of the test case
 	name string
@@ -33,8 +28,6 @@ type testCase struct {
 	// `go list` lookups. The go.mod in this directory (or one of
 	// its parents) is used to resolve package paths.
 	wd string
-	// UROOT_SOURCE
-	urootSource string
 	// GBB_PATH
 	gbbPath []string
 	// Input patterns
@@ -50,14 +43,6 @@ type testCase struct {
 }
 
 func TestResolve(t *testing.T) {
-	if *urootSource == "" {
-		t.Fatalf("Test must be started with -uroot-source= set to local path to u-root file system directory")
-	}
-	urootSrc, err := filepath.Abs(*urootSource)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	gbbmod, err := filepath.Abs("../../../")
 	if err != nil {
 		t.Fatalf("failure to set up test: %v", err)
@@ -342,8 +327,7 @@ func TestResolve(t *testing.T) {
 			env = env.Copy(golang.WithWorkingDir(tc.wd))
 			t.Run(fmt.Sprintf("ResolveGlobs-GO111MODULE=%s-%s", env.GO111MODULE, tc.name), func(t *testing.T) {
 				e := Env{
-					GBBPath:     tc.gbbPath,
-					URootSource: tc.urootSource,
+					GBBPath: tc.gbbPath,
 				}
 				out, err := ResolveGlobs(l, env, e, tc.in)
 				if tc.err != nil && !errors.Is(err, tc.err) {
@@ -359,20 +343,9 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
-	noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(t.TempDir()))
+	//noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(t.TempDir()))
 
 	newPkgTests := append(sharedTestCases, testCase{
-		// UROOT_SOURCE, file system paths, non-Gobusybox module.
-		// Cannot resolve dependency packages without GOPATH.
-		name:        "fspath-uroot-source-no-GOPATH",
-		envs:        []*golang.Environ{noGopathModuleOffEnv},
-		urootSource: urootSrc,
-		in: []string{
-			"cmds/core/ip",
-			"github.com/u-root/u-root/cmds/core/dhclient",
-		},
-		wantErr: true,
-	}, testCase{
 		name:    "fspath-parse-broken",
 		in:      []string{"./test/parsebroken"},
 		wantErr: true,
@@ -390,8 +363,7 @@ func TestResolve(t *testing.T) {
 			env = env.Copy(golang.WithWorkingDir(tc.wd))
 			t.Run(fmt.Sprintf("NewPackage-GO111MODULE=%s-%s", env.GO111MODULE, tc.name), func(t *testing.T) {
 				e := Env{
-					GBBPath:     tc.gbbPath,
-					URootSource: tc.urootSource,
+					GBBPath: tc.gbbPath,
 				}
 				out, err := NewPackages(l, env, e, tc.in...)
 				if tc.err != nil && !errors.Is(err, tc.err) {
