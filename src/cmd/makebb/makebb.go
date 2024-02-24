@@ -64,16 +64,7 @@ func main() {
 		GenerateOnly: *genOnly,
 	}
 	if err := bb.BuildBusybox(l, opts); err != nil {
-		l.Print(err)
-		var errGopath *bb.ErrGopathBuild
-		var errGomod *bb.ErrModuleBuild
-		if errors.As(err, &errGopath) {
-			l.Fatalf("Preserving bb generated source directory at %s due to error. To reproduce build, `cd %s` and `GO111MODULE=off GOPATH=%s go build`.", tmpDir, errGopath.CmdDir, errGopath.GOPATH)
-		} else if errors.As(err, &errGomod) {
-			l.Fatalf("Preserving bb generated source directory at %s due to error. To debug build, `cd %s` and use `go build` to build, or `go mod [why|tidy|graph]` to debug dependencies, or `go list -m all` to list all dependency versions.", tmpDir, errGomod.CmdDir)
-		} else {
-			l.Fatalf("Preserving bb generated source directory at %s due to error.", tmpDir)
-		}
+		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)
 	} else if opts.GenerateOnly {
 		l.Printf("Generated source can be found in %s. `cd %s && go build` to build.", tmpDir, filepath.Join(tmpDir, "src/bb.u-root.com/bb"))
 	}
