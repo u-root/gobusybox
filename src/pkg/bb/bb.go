@@ -204,16 +204,13 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return fmt.Errorf("failed to write main.go: %v", err)
 	}
 
-	// Get ready to compile bb.
-	opts.Env.GO111MODULE = "off"
-	opts.Env.GOPATH = tmpDir
-
 	if opts.GenerateOnly {
 		return nil
 	}
 
-	// Compile bb.
-	if err := opts.Env.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
+	// Get ready to compile bb.
+	buildEnv := opts.Env.Copy(golang.WithGO111MODULE("off"), golang.WithGOPATH(tmpDir), golang.WithMod(""))
+	if err := buildEnv.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
 		return &ErrBuild{
 			CmdDir: bbDir,
 			GOPATH: tmpDir,
