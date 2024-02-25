@@ -445,3 +445,53 @@ func ResolveGlobs(l ulog.Logger, genv *golang.Environ, env Env, patterns []strin
 	sort.Strings(paths)
 	return paths, nil
 }
+
+// Modules returns a list of module directories => directories of packages
+// inside that module as well as packages that have no discernible module.
+//
+// The module for a package is determined by the **first** parent directory
+// that contains a go.mod.
+func Modules(paths []string) (map[string][]string, []string) {
+	// list of module directory => directories of packages it likely contains
+	moduledPackages := make(map[string][]string)
+	var noModulePkgs []string
+	for _, fullPath := range paths {
+		components := strings.Split(fullPath, "/")
+
+		inModule := false
+		for i := len(components); i >= 1; i-- {
+			prefixPath := "/" + filepath.Join(components[:i]...)
+			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
+				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
+				inModule = true
+				break
+			}
+		}
+		if !inModule {
+			noModulePkgs = append(noModulePkgs, fullPath)
+		}
+	}
+	return moduledPackages, noModulePkgs
+}
+
+func globPaths(l ulog.Logger, env Env, patterns []string) []string {
+	var ret []string
+	for _, pattern := range patterns {
+		if match, directories := env.Glob(l, pattern); len(directories) > 0 {
+			ret = append(ret, directories...)
+		} else if !match {
+			l.Printf("No match found for %v", pattern)
+		}
+	}
+	return ret
+}
+
+// GlobPaths resolves file path globs in env with exclusions and shell
+// expansions.
+func GlobPaths(l ulog.Logger, env Env, patterns ...string) []string {
+	includes, excludes := splitExclusions(patterns)
+	includes = globPaths(l, env, expand(includes))
+	excludes = globPaths(l, env, expand(excludes))
+	paths := excludePaths(includes, excludes)
+	return paths
+}

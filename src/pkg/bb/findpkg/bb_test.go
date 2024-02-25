@@ -7,7 +7,6 @@ package findpkg
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -58,7 +57,7 @@ func TestResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll("./test/resolvebroken") })
-	if err := ioutil.WriteFile("./test/resolvebroken/main.go", []byte("broken"), 0777); err != nil {
+	if err := os.WriteFile("./test/resolvebroken/main.go", []byte("broken"), 0777); err != nil {
 		t.Fatal(err)
 	}
 
@@ -66,7 +65,7 @@ func TestResolve(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = os.RemoveAll("./test/parsebroken") })
-	if err := ioutil.WriteFile("./test/parsebroken/main.go", []byte("package main\n\nimport \"fmt\""), 0777); err != nil {
+	if err := os.WriteFile("./test/parsebroken/main.go", []byte("package main\n\nimport \"fmt\""), 0777); err != nil {
 		t.Fatal(err)
 	}
 
@@ -438,5 +437,69 @@ func TestDefaultEnv(t *testing.T) {
 				t.Errorf("Env.String() = %v, want %v", e, tc.s)
 			}
 		})
+	}
+}
+
+func TestModules(t *testing.T) {
+	dir := t.TempDir()
+
+	_ = os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd1"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mod1/cmd/cmd2"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mod2/cmd/foo3"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "mod2/cmd/foo4"), 0755)
+	_ = os.MkdirAll(filepath.Join(dir, "nomod/cmd/cmd7"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "mod1/go.mod"), nil, 0644)
+	_ = os.WriteFile(filepath.Join(dir, "mod1/nestedmod1/go.mod"), nil, 0644)
+	_ = os.WriteFile(filepath.Join(dir, "mod1/nestedmod2/go.mod"), nil, 0644)
+	_ = os.WriteFile(filepath.Join(dir, "mod2/go.mod"), nil, 0644)
+
+	paths := []string{
+		filepath.Join(dir, "mod1/cmd/cmd1"),
+		filepath.Join(dir, "mod1/cmd/cmd2"),
+		filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"),
+		filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"),
+		filepath.Join(dir, "mod2/cmd/foo3"),
+		filepath.Join(dir, "mod2/cmd/foo4"),
+		filepath.Join(dir, "nomod/cmd/cmd7"),
+	}
+	mods, noModulePkgs := Modules(paths)
+
+	want := map[string][]string{
+		filepath.Join(dir, "mod1"): {
+			filepath.Join(dir, "mod1/cmd/cmd1"),
+			filepath.Join(dir, "mod1/cmd/cmd2"),
+		},
+		filepath.Join(dir, "mod1/nestedmod1"): {
+			filepath.Join(dir, "mod1/nestedmod1/cmd/cmd5"),
+		},
+		filepath.Join(dir, "mod1/nestedmod2"): {
+			filepath.Join(dir, "mod1/nestedmod2/cmd/cmd6"),
+		},
+		filepath.Join(dir, "mod2"): {
+			filepath.Join(dir, "mod2/cmd/foo3"),
+			filepath.Join(dir, "mod2/cmd/foo4"),
+		},
+	}
+	if !reflect.DeepEqual(mods, want) {
+		t.Errorf("modules() = %v, want %v", mods, want)
+	}
+	wantNoModule := []string{
+		filepath.Join(dir, "nomod/cmd/cmd7"),
+	}
+	if !reflect.DeepEqual(noModulePkgs, wantNoModule) {
+		t.Errorf("modules() no module pkgs = %v, want %v", noModulePkgs, wantNoModule)
+	}
+
+	wantG := []string{
+		filepath.Join(dir, "mod1/cmd/cmd1"),
+		filepath.Join(dir, "mod2/cmd/foo3"),
+	}
+	e := Env{
+		GBBPath: []string{filepath.Join(dir, "mod1"), filepath.Join(dir, "mod2")},
+	}
+	if got := GlobPaths(&ulogtest.Logger{TB: t}, e, `cmd/cmd*`, "cmd/foo3", "-cmd/cmd2"); !reflect.DeepEqual(got, wantG) {
+		t.Errorf("GlobPaths = %v, want %v", got, wantG)
 	}
 }
