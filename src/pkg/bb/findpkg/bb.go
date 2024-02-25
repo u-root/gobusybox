@@ -22,6 +22,7 @@ import (
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
 	"golang.org/x/tools/go/packages"
+	"mvdan.cc/sh/v3/shell"
 )
 
 func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*packages.Package, error) {
@@ -393,17 +394,26 @@ func ResolveGlobs(logger ulog.Logger, genv *golang.Environ, env Env, patterns []
 		if isExclude {
 			pattern = pattern[1:]
 		}
-		if match, directories := findDirectoryMatches(logger, env, pattern); len(directories) > 0 {
-			if !isExclude {
-				includes = append(includes, directories...)
-			} else {
-				excludes = append(excludes, directories...)
-			}
-		} else if !match {
-			if !isExclude {
-				includes = append(includes, pattern)
-			} else {
-				excludes = append(excludes, pattern)
+
+		fields, err := shell.Fields(pattern, func(_ string) string {
+			return ""
+		})
+		if err != nil {
+			fields = []string{pattern}
+		}
+		for _, field := range fields {
+			if match, directories := findDirectoryMatches(logger, env, field); len(directories) > 0 {
+				if !isExclude {
+					includes = append(includes, directories...)
+				} else {
+					excludes = append(excludes, directories...)
+				}
+			} else if !match {
+				if !isExclude {
+					includes = append(includes, field)
+				} else {
+					excludes = append(excludes, field)
+				}
 			}
 		}
 	}
