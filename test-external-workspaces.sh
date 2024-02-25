@@ -7,13 +7,16 @@ else
   GO="$GOROOT/bin/go"
 fi
 
-cd src/cmd/makebb
-
+pushd src/cmd/makebb
 $GO build -covermode=atomic
+popd
 
-cd ../../..
+pushd src/cmd/goanywhere
+$GO build -covermode=atomic
+popd
 
 MAKEBB=$(pwd)/src/cmd/makebb/makebb
+GOANYWHERE=$(pwd)/src/cmd/goanywhere/goanywhere
 TMPDIR=$(mktemp -d)
 EMPTY_TMPDIR=$(mktemp -d)
 
@@ -40,8 +43,6 @@ trap ctrl_c INT
 go work init ./u-root && go work use ./gokrazy && go work use ./p9
 
 # Test reproducible builds.
-echo $TMPDIR
-echo $(pwd)
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly -o bb1 ./u-root/cmds/*/*
 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=readonly -o bb2 ./u-root/cmds/*/*
 
@@ -59,6 +60,12 @@ then
   go work vendor
   GOARCH=amd64 GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR GO111MODULE=on $MAKEBB -go-mod=vendor ./u-root/cmds/*/* ./gokrazy/cmd/* ./p9/cmd/*
 fi
+
+# Remove workspace.
+rm -rf vendor
+rm go.work go.work.sum
+
+$GOANYWHERE -d ./u-root/cmds/*/* ./p9/cmd/* -- $MAKEBB -o $(pwd)
 
 popd
 rm -rf $TMPDIR

@@ -147,6 +147,36 @@ GBB_PATH=$(pwd)/u-root:$(pwd)/cpu makebb \
 #   $(pwd)/cpu/cmds/cpud
 ```
 
+### goanywhere
+
+```shell
+go install github.com/u-root/gobusybox/src/cmd/goanywhere@latest
+```
+
+`goanywhere` creates a Go workspace temporarily on the fly from the packages'
+modules in the given local file paths.
+
+goanywhere then executes the command given after "--" in the workspace
+directory and amends the packages as args.
+
+For example,
+
+```
+# -o $(pwd) is needed since goanywhere executes the command in the workspace
+# directory, and by default the Go binary is created in the current wd.
+goanywhere ./u-root/cmds/core/{init,gosh} -- go build -o $(pwd)
+goanywhere ./u-root/cmds/core/{init,gosh} -- makebb -o $(pwd)
+goanywhere ./u-root/cmds/core/{init,gosh} -- mkuimage [other args]
+goanywhere ./u-root/cmds/core/{init,gosh} -- u-root [other args]
+```
+
+Like `makebb`, `goanywhere` supports `GBB_PATH`, globs and shell expansions.
+
+```
+GBB_PATH=$(pwd)/u-root:$(pwd)/cpu goanywhere \
+    cmds/core/{init,gosh} cmds/cpud -- makebb -o $(pwd)
+```
+
 ### makebb with multiple Go modules
 
 `makebb` supports Go workspaces for locally checked out sources, as shown above.
