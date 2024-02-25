@@ -177,6 +177,22 @@ import (
 )
 ```
 
+You can generate this file for your repo with the `gencmddeps` tool:
+
+```
+go install github.com/u-root/gobusybox/src/cmd/gencmddeps@latest
+
+gencmddeps -o deps.go -t tools -p something \
+    github.com/u-root/u-root/cmds/core/{ip,init} \
+    github.com/hugelgupf/p9/cmd/p9ufs
+```
+
+> [!IMPORTANT]
+> `gencmddeps` does not support file paths or exclusions, as these rely on a
+> `go.mod` already being present to resolve the Go package name.
+>
+> The input to gencmddeps must be full Go package paths.
+
 The unused build tag keeps it from being compiled, but its existence forces `go
 mod` to add these dependencies to `go.mod`:
 
