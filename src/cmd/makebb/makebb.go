@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/dustin/go-humanize"
 	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 )
@@ -74,5 +75,17 @@ func main() {
 		os.RemoveAll(tmpDir)
 	} else {
 		l.Printf("Keeping temp dir %v", tmpDir)
+	}
+
+	path := *outputPath
+	if stat, err := os.Stat(path); err == nil {
+		if stat.IsDir() {
+			path = filepath.Join(path, "bb")
+			stat, err = os.Stat(path)
+			if err != nil {
+				return
+			}
+		}
+		l.Printf("Successfully built %q (size %d bytes -- %s).", path, stat.Size(), humanize.IBytes(uint64(stat.Size())))
 	}
 }
