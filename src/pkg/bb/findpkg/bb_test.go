@@ -233,8 +233,20 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/u-root/cmds/core/ip",
 			},
 		},
-		// TODO: vendored multi module?
-
+		// Shell expansions.
+		{
+			name: "pkgpath-shell-expansion",
+			envs: []*golang.Environ{moduleOnEnv},
+			wd:   filepath.Join(gbbroot, "test/resolve-modules"),
+			in: []string{
+				"github.com/u-root/u-root/cmds/core/{init,ip,dhclient}",
+			},
+			want: []string{
+				"github.com/u-root/u-root/cmds/core/dhclient",
+				"github.com/u-root/u-root/cmds/core/init",
+				"github.com/u-root/u-root/cmds/core/ip",
+			},
+		},
 		// Exclusion, single package, file system path.
 		{
 			name: "fspath-exclusion",
