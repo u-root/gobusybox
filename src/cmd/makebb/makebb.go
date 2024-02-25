@@ -20,6 +20,7 @@ var (
 	outputPath = flag.String("o", "bb", "Path to compiled busybox binary")
 	genDir     = flag.String("gen-dir", "", "Directory to generate source in")
 	genOnly    = flag.Bool("g", false, "Generate but do not build binaries")
+	keep       = flag.Bool("k", false, "Keep generated source temporary directory")
 )
 
 func main() {
@@ -64,11 +65,14 @@ func main() {
 	}
 	if err := bb.BuildBusybox(l, opts); err != nil {
 		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)
+		// Only remove temp dir if there was no error.
+		remove = false
 	} else if opts.GenerateOnly {
 		l.Printf("Generated source can be found in %s. `cd %s && go build` to build.", tmpDir, filepath.Join(tmpDir, "src/bb.u-root.com/bb"))
 	}
-	// Only remove temp dir if there was no error.
-	if remove && !opts.GenerateOnly {
+	if remove && !opts.GenerateOnly && !*keep {
 		os.RemoveAll(tmpDir)
+	} else {
+		l.Printf("Keeping temp dir %v", tmpDir)
 	}
 }
