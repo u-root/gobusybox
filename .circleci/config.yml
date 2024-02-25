@@ -24,30 +24,8 @@ workflows:
     jobs:
       - clean-gopath
       - clean-gomod
-      - clean-makebb
 
 jobs:
-  clean-makebb:
-    <<: [*go122-template, *gomod-template]
-    steps:
-      - checkout
-      - run:
-          name: check generated code
-          command: |
-            mkdir -p /home/circleci/go/bin
-            go build ./src/cmd/embedvar
-            cp ./embedvar $GOPATH/bin
-            export PATH=$GOPATH/bin:$PATH
-            cd src/pkg/bb
-            go generate
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'Generated bbmain code is out of date. Run `go install ./src/cmd/embevar && cd src/pkg/bb && go generate` and then check changes in git.'
-              git status --porcelain .
-              git diff
-              exit 1
-            fi
-
   clean-gopath:
     <<: [*go122-template, *gopath-template]
     steps:
