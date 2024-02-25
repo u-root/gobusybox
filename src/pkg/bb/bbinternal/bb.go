@@ -346,6 +346,9 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 					continue
 				}
 
+				ast.Fprint(os.Stdout, p.Pkg.Fset, s, nil)
+				//log.Printf("%#v", s)
+
 				// For each assignment, create a new init
 				// function, and place it in the same file.
 				for i, name := range s.Names {
