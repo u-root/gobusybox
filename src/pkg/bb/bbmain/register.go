@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	// There MUST NOT be any other dependencies here.
 	//
 	// It is preferred to copy minimal code necessary into this file, as
@@ -28,6 +29,7 @@ func ListCmds() []string {
 	for c := range bbCmds {
 		cmds = append(cmds, c)
 	}
+	sort.Strings(cmds)
 	return cmds
 }
 
