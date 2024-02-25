@@ -300,9 +300,7 @@ func (b *BuildOpts) RegisterFlags(f *flag.FlagSet) {
 	f.Var((*uflag.Strings)(&b.ExtraArgs), "go-extra-args", "Extra args to 'go build'")
 }
 
-// BuildDir compiles the package in the directory `dirPath`, writing the build
-// object to `binaryPath`.
-func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) error {
+func (c Environ) build(dirPath string, binaryPath string, pattern []string, opts *BuildOpts) error {
 	args := []string{
 		// Force rebuilding of packages.
 		"-a",
@@ -337,14 +335,26 @@ func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) er
 	if len(c.BuildTags) > 0 {
 		args = append(args, []string{"-tags", strings.Join(c.BuildTags, " ")}...)
 	}
-	// We always set the working directory, so this is always '.'.
-	args = append(args, ".")
+	args = append(args, pattern...)
 
 	cmd := c.GoCmd("build", args...)
-	cmd.Dir = dirPath
+	if dirPath != "" {
+		cmd.Dir = dirPath
+	}
 
 	if o, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("error building go package in %q: %v, %v", dirPath, string(o), err)
 	}
 	return nil
+}
+
+// BuildDir compiles the package in the directory `dirPath`, writing the build
+// object to `binaryPath`.
+func (c Environ) BuildDir(dirPath string, binaryPath string, opts *BuildOpts) error {
+	return c.build(dirPath, binaryPath, []string{"."}, opts)
+}
+
+// Build compiles the pattern.
+func (c Environ) Build(binaryPath string, pattern []string, opts *BuildOpts) error {
+	return c.build("", binaryPath, pattern, opts)
 }
