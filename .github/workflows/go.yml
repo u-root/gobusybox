@@ -59,6 +59,10 @@ jobs:
       - name: Test
         run: |
           cd go/src/github.com/u-root/gobusybox/src
+
+          # Make sure GO111MODULE=off cases work.
+          go mod vendor
+
           # Unit tests cover both GO111MODULE=on and off cases.
           GOPATH=$GITHUB_WORKSPACE/go go test -covermode=atomic -coverprofile cover.out ./...
 
