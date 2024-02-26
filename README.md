@@ -18,11 +18,8 @@ determine which command is being called.
 | Go version | Tested are 1.20-1.22                                  |
 | Packaging  | Go workspaces, Go modules, Go vendoring               |
 | `GOOS`     | any (linux is tested)                                 |
-| `GOARCH`   | any (amd64, arm, arm64, riscv64 are untested)         |
+| `GOARCH`   | any (amd64, arm, arm64, riscv64 are tested)           |
 | CGO        | *Not supported*                                       |
-
-Other `GOARCH` and `GOOS` architectures are likely to work as well, but are
-untested.
 
 An example:
 
@@ -38,6 +35,13 @@ A binary named `bb` should appear. It can be invoked in one of two ways --
 either with a symlink or using a second argument.
 
 ```bash
+./bb dmesg
+./bb strace echo "hi"
+```
+
+It is meant to be used with symlinks for convenience:
+
+```bash
 # Make a symlink dmesg -> bb
 ln -s bb dmesg
 # Symlink means that argv[0] is the command name.
@@ -46,13 +50,6 @@ ln -s bb dmesg
 # Make a symlink strace -> bb
 ln -s bb strace
 ./strace echo "hi"
-```
-
-If symlinks are a hassle, you can also invoke the binary like this:
-
-```bash
-./bb dmesg
-./bb strace echo "hi"
 ```
 
 Go Busybox does this by copying all the source for these Go commands and
@@ -74,7 +71,7 @@ makebb ./cpu/cmds/* ./p9/cmd/*
 ```
 
 > [!IMPORTANT]
-> `makebb` works any time `go build` or `go list` work.
+> `makebb` works any time `go build` or `go list` also work.
 >
 > For multi-module compilation, use Go workspaces or read below.
 
