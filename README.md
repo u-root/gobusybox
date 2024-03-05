@@ -24,7 +24,7 @@ determine which command is being called.
 An example:
 
 ```bash
-go install github.com/u-root/gobusybox/cmd/makebb@latest
+go install github.com/u-root/gobusybox/src/cmd/makebb@latest
 
 git clone github.com/u-root/u-root
 cd u-root
