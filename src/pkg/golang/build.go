@@ -6,6 +6,7 @@
 package golang
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"go/build"
@@ -29,6 +30,15 @@ const (
 	ModVendor   ModBehavior = "vendor"
 )
 
+type Compiler struct {
+	Path          string
+	Identifier    string // e.g. 'tinygo' or 'go'
+	Version       string // compiler-tool version
+	VersionGo     string // version of go: same as 'Version' for standard go
+	VersionOutput string // output of calling 'tool version'
+	IsInit        bool   // InitCompiler() succeeded
+}
+
 // Environ are the environment variables for the Go compiler.
 type Environ struct {
 	build.Context
@@ -36,6 +46,8 @@ type Environ struct {
 	GO111MODULE string
 	Mod         ModBehavior
 	GBBDEBUG    bool
+
+	Compiler Compiler
 }
 
 // Copy makes a copy of Environ with the given changes.
@@ -45,6 +57,7 @@ func (c *Environ) Copy(opts ...Opt) *Environ {
 		GO111MODULE: c.GO111MODULE,
 		Mod:         c.Mod,
 		GBBDEBUG:    c.GBBDEBUG,
+		Compiler:    c.Compiler,
 	}
 	e.Apply(opts...)
 	return e
@@ -54,6 +67,8 @@ func (c *Environ) Copy(opts ...Opt) *Environ {
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
 	f.Var((*uflag.Strings)(&c.BuildTags), "go-build-tags", "Go build tags")
 	f.StringVar((*string)(&c.Mod), "go-mod", string(c.Mod), "Value of -mod to go commands (allowed: (empty), vendor, mod, readonly)")
+	f.StringVar((*string)(&c.Compiler.Path), "compiler", "",
+		"override go compiler to use (e.g. \"/path/to/tinygo\")")
 }
 
 // Valid returns an error if GOARCH, GOROOT, or GOOS are unset.
@@ -176,13 +191,16 @@ func (c *Environ) Apply(opts ...Opt) {
 
 // Lookup looks up packages by patterns relative to dir, using the Go environment from c.
 func (c *Environ) Lookup(mode packages.LoadMode, patterns ...string) ([]*packages.Package, error) {
+	if err := c.InitCompiler(); err != nil {
+		return nil, err
+	}
 	cfg := &packages.Config{
 		Mode: mode,
 		Env:  append(os.Environ(), c.Env()...),
 		Dir:  c.Dir,
 	}
 	if len(c.Context.BuildTags) > 0 {
-		tags := fmt.Sprintf("-tags=%s", strings.Join(c.Context.BuildTags, ","))
+		tags := fmt.Sprintf("-tags=%s", strings.Join(c.BuildTags, ","))
 		cfg.BuildFlags = []string{tags}
 	}
 	if c.GO111MODULE != "off" && len(c.Mod) > 0 {
@@ -193,7 +211,10 @@ func (c *Environ) Lookup(mode packages.LoadMode, patterns ...string) ([]*package
 
 // GoCmd runs a go command in the environment.
 func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
-	goBin := filepath.Join(c.GOROOT, "bin", "go")
+	goBin := c.Compiler.Path
+	if "" == goBin {
+		goBin = filepath.Join(c.GOROOT, "bin", "go")
+	}
 	args = append([]string{gocmd}, args...)
 	cmd := exec.Command(goBin, args...)
 	if c.GBBDEBUG {
@@ -204,19 +225,107 @@ func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// Version returns the Go version string that runtime.Version would return for
-// the Go compiler in this environ.
-func (c Environ) Version() (string, error) {
+// resolve absolute path of go-compiler option from PATH
+func (c *Environ) resolveCompiler() error {
+	if c.Compiler.Path != "" {
+		fname, err := exec.LookPath(string(c.Compiler.Path))
+		if err == nil {
+			fname, err = filepath.Abs(fname)
+		}
+		if err != nil {
+			return fmt.Errorf("build: %v", err)
+		}
+		c.Compiler.Path = fname
+	}
+	return nil
+}
+
+// runs GoCmd("version") and parse/caches output, to environ.Compiler
+func (c *Environ) InitCompiler() error {
+
+	if c.Compiler.IsInit {
+		return nil
+	}
+
+	c.resolveCompiler()
+
 	cmd := c.GoCmd("version")
 	v, err := cmd.CombinedOutput()
 	if err != nil {
+		return err
+	}
+
+	efmt := "go-compiler 'version' output unrecognized: %v"
+	s := strings.Fields(string(v))
+	if len(s) < 1 {
+		return fmt.Errorf(efmt, string(v))
+	}
+
+	compiler := c.Compiler
+	compiler.Identifier = s[0]
+	compiler.VersionOutput = string(v)
+	compiler.IsInit = true
+
+	switch compiler.Identifier {
+
+	case "go":
+		if len(s) < 3 {
+			return fmt.Errorf(efmt, string(v))
+		}
+		compiler.Version = s[2]
+		compiler.VersionGo = s[2]
+
+	case "tinygo":
+		// e.g. "tinygo version 0.33.0 darwin/arm64 (using go version go1.22.2 and LLVM version 18.1.2)"
+		if len(s) < 8 {
+			return fmt.Errorf(efmt, string(v))
+		}
+		compiler.Version = s[2]
+		compiler.VersionGo = s[7]
+
+		// Fetch additional go-build-tags from tinygo
+		// package fetch needs correct tags to prune
+		cmd := c.GoCmd("info", "-json")
+		infov, err := cmd.CombinedOutput()
+		if err != nil {
+			return err
+		}
+		var info map[string]interface{}
+		err = json.Unmarshal(infov, &info)
+		if err != nil {
+			return err
+		}
+		tags := []string{}
+		unique := make(map[string]bool)
+		addUnique := func(tag string) {
+			if unique[tag] {
+				return
+			}
+			unique[tag] = true
+			tags = append(tags, tag)
+		}
+		for _, tag := range c.BuildTags {
+			addUnique(tag)
+		}
+		for _, tag := range info["build_tags"].([]interface{}) {
+			addUnique(tag.(string))
+		}
+		c.BuildTags = tags
+
+	default:
+		return fmt.Errorf(efmt, string(v))
+	}
+	c.Compiler = compiler
+	return nil
+}
+
+// Version returns the Go version string that runtime.Version would return for
+// the Go compiler in this environ.
+func (c *Environ) Version() (string, error) {
+	if err := c.InitCompiler(); err != nil {
 		return "", err
 	}
-	s := strings.Fields(string(v))
-	if len(s) < 3 {
-		return "", fmt.Errorf("unknown go version, tool returned weird output for 'go version': %v", string(v))
-	}
-	return s[2], nil
+	return c.Compiler.VersionGo, nil
 }
 
 func (c Environ) envCommon() []string {
@@ -301,40 +410,69 @@ func (b *BuildOpts) RegisterFlags(f *flag.FlagSet) {
 }
 
 func (c Environ) build(dirPath string, binaryPath string, pattern []string, opts *BuildOpts) error {
-	args := []string{
-		// Force rebuilding of packages.
-		"-a",
 
+	if err := c.InitCompiler(); err != nil {
+		return err
+	}
+
+	args := []string{
 		"-o", binaryPath,
 	}
+
 	if c.GO111MODULE != "off" && len(c.Mod) > 0 {
 		args = append(args, "-mod", string(c.Mod))
 	}
 	if c.InstallSuffix != "" {
 		args = append(args, "-installsuffix", c.Context.InstallSuffix)
 	}
-	if opts == nil || !opts.EnableInlining {
-		// Disable "function inlining" to get a (likely) smaller binary.
-		args = append(args, "-gcflags=all=-l")
+
+	switch c.Compiler.Identifier {
+	case "go":
+
+		// Force rebuilding of packages.
+		args = append(args, "-a")
+
+		if opts == nil || !opts.EnableInlining {
+			// Disable "function inlining" to get a (likely) smaller binary.
+			args = append(args, "-gcflags=all=-l")
+		}
+
+		if opts == nil || !opts.NoStrip {
+			// Strip all symbols, and don't embed a Go build ID to be reproducible.
+			args = append(args, "-ldflags", "-s -w -buildid=")
+		}
+
+		if opts == nil || !opts.NoTrimPath {
+			// Reproducible builds: Trim any GOPATHs out of the executable's
+			// debugging information.
+			//
+			// E.g. Trim /tmp/bb-*/ from /tmp/bb-12345567/src/github.com/...
+			args = append(args, "-trimpath")
+		}
+
+	case "tinygo":
+
+		// TODO: handle force-rebuild of packages (-a to standard go)
+		// TODO: handle EnableInlining
+
+		// Strip all symbols. TODO: not sure about buildid
+		if opts == nil || !opts.NoStrip {
+			// Strip all symbols
+			args = append(args, "-no-debug")
+		}
+
+		// TODO: handle NoTrimpPath
+
 	}
-	if opts == nil || !opts.NoStrip {
-		// Strip all symbols, and don't embed a Go build ID to be reproducible.
-		args = append(args, "-ldflags", "-s -w -buildid=")
+
+	if len(c.BuildTags) > 0 {
+		args = append(args, fmt.Sprintf("-tags=%s", strings.Join(c.BuildTags, ",")))
 	}
-	if opts == nil || !opts.NoTrimPath {
-		// Reproducible builds: Trim any GOPATHs out of the executable's
-		// debugging information.
-		//
-		// E.g. Trim /tmp/bb-*/ from /tmp/bb-12345567/src/github.com/...
-		args = append(args, "-trimpath")
-	}
+
 	if opts != nil {
 		args = append(args, opts.ExtraArgs...)
 	}
 
-	if len(c.BuildTags) > 0 {
-		args = append(args, []string{"-tags", strings.Join(c.BuildTags, " ")}...)
-	}
 	args = append(args, pattern...)
 
 	cmd := c.GoCmd("build", args...)

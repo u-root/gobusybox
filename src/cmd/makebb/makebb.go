@@ -43,7 +43,14 @@ func main() {
 		l.Printf("Disabling CGO for u-root...")
 		env.CgoEnabled = false
 	}
+
+	err = env.InitCompiler()
+	if err != nil {
+		l.Fatal(err)
+	}
+
 	l.Printf("Build environment: %s", env)
+	l.Printf("Compiler: %s", env.Compiler.VersionOutput)
 
 	tmpDir := *genDir
 	remove := false
