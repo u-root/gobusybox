@@ -168,6 +168,13 @@ func WithWorkingDir(wd string) Opt {
 	}
 }
 
+// WithCompiler sets the compiler for Build() / BuildDir()
+func WithCompiler(p string) Opt {
+	return func(c *Environ) {
+		c.Compiler.Path = p
+	}
+}
+
 // Default is the default build environment comprised of the default GOPATH,
 // GOROOT, GOOS, GOARCH, and CGO_ENABLED values.
 func Default(opts ...Opt) *Environ {
