@@ -44,7 +44,7 @@ func main() {
 		env.CgoEnabled = false
 	}
 
-	err = env.InitCompiler()
+	err = env.CompilerInit()
 	if err != nil {
 		l.Fatal(err)
 	}
