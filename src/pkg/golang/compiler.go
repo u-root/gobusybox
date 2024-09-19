@@ -23,7 +23,7 @@ const (
 	CompilerUnkown
 )
 
-// cached information re: the compiler
+// Cached information about the compiler used.
 type Compiler struct {
 	Path          string
 	Identifier    string // e.g. 'tinygo' or 'go'
@@ -34,7 +34,7 @@ type Compiler struct {
 	IsInit        bool   // CompilerInit() succeeded
 }
 
-// map the compiler's identifier ("tinygo" or "go") to enum
+// Map the compiler's identifier ("tinygo" or "go") to enum.
 func CompilerTypeFromString(name string) CompilerType {
 	val, ok := map[string]CompilerType{
 		"go":     CompilerGo,
@@ -46,7 +46,7 @@ func CompilerTypeFromString(name string) CompilerType {
 	return CompilerUnkown
 }
 
-// WithCompiler sets the compiler for Build() / BuildDir()
+// Sets the compiler for Build() / BuildDir() functions.
 func WithCompiler(p string) Opt {
 	return func(c *Environ) {
 		c.Compiler.Path = p
@@ -54,7 +54,7 @@ func WithCompiler(p string) Opt {
 	}
 }
 
-// compilerCmd returns a compiler command to be run in the environment.
+// Returns a compiler command to be run in the environment.
 func (c Environ) compilerCmd(gocmd string, args ...string) *exec.Cmd {
 	goBin := c.Compiler.Path
 	if "" == goBin {
@@ -70,8 +70,7 @@ func (c Environ) compilerCmd(gocmd string, args ...string) *exec.Cmd {
 	return cmd
 }
 
-// if go-compiler specified, resolve absolute-path from PATH,
-// otherwise return 'nil'.
+// If go-compiler specified, return its absolute-path, otherwise return 'nil'.
 func (c *Environ) compilerAbs() error {
 	if c.Compiler.Path != "" {
 		fname, err := exec.LookPath(string(c.Compiler.Path))
@@ -86,9 +85,8 @@ func (c *Environ) compilerAbs() error {
 	return nil
 }
 
-// runs compilerCmd("version") and parse/caches output, to environ.Compiler
+// Runs compilerCmd("version") and parse/caches output to c.Compiler.
 func (c *Environ) CompilerInit() error {
-
 	if c.Compiler.IsInit {
 		return nil
 	}
@@ -96,19 +94,20 @@ func (c *Environ) CompilerInit() error {
 	c.compilerAbs()
 
 	cmd := c.compilerCmd("version")
-	v, err := cmd.CombinedOutput()
+	vb, err := cmd.CombinedOutput()
 	if err != nil {
 		return err
 	}
+	v := string(vb)
 
 	efmt := "go-compiler 'version' output unrecognized: %v"
-	s := strings.Fields(string(v))
+	s := strings.Fields(v)
 	if len(s) < 1 {
-		return fmt.Errorf(efmt, string(v))
+		return fmt.Errorf(efmt, v)
 	}
 
 	compiler := c.Compiler
-	compiler.VersionOutput = string(v)
+	compiler.VersionOutput = strings.TrimSpace(v)
 	compiler.Identifier = s[0]
 	compiler.Type = CompilerTypeFromString(compiler.Identifier)
 	compiler.IsInit = true
@@ -117,7 +116,7 @@ func (c *Environ) CompilerInit() error {
 
 	case CompilerGo:
 		if len(s) < 3 {
-			return fmt.Errorf(efmt, string(v))
+			return fmt.Errorf(efmt, v)
 		}
 		compiler.Version = s[2]
 		compiler.VersionGo = s[2]
@@ -125,7 +124,7 @@ func (c *Environ) CompilerInit() error {
 	case CompilerTinygo:
 		// e.g. "tinygo version 0.33.0 darwin/arm64 (using go version go1.22.2 and LLVM version 18.1.2)"
 		if len(s) < 8 {
-			return fmt.Errorf(efmt, string(v))
+			return fmt.Errorf(efmt, v)
 		}
 		compiler.Version = s[2]
 		compiler.VersionGo = s[7]
@@ -156,14 +155,14 @@ func (c *Environ) CompilerInit() error {
 		}
 
 	case CompilerUnkown:
-		return fmt.Errorf(efmt, string(v))
+		return fmt.Errorf(efmt, v)
 	}
 	c.Compiler = compiler
 	return nil
 }
 
-// Version returns the Go version string that runtime.Version would return for
-// the Go compiler in this environ.
+// Returns the Go version string that runtime.Version would return for the Go
+// compiler in this environ.
 func (c *Environ) Version() (string, error) {
 	if err := c.CompilerInit(); err != nil {
 		return "", err
@@ -172,7 +171,6 @@ func (c *Environ) Version() (string, error) {
 }
 
 func (c Environ) build(dirPath string, binaryPath string, pattern []string, opts *BuildOpts) error {
-
 	if err := c.CompilerInit(); err != nil {
 		return err
 	}

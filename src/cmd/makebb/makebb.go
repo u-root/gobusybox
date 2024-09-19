@@ -49,8 +49,8 @@ func main() {
 		l.Fatal(err)
 	}
 
-	l.Printf("Build environment: %s", env)
-	l.Printf("Compiler: %s", env.Compiler.VersionOutput)
+	l.Printf("Build environment: %s\n", env)
+	l.Printf("Compiler: %s\n", env.Compiler.VersionOutput)
 
 	tmpDir := *genDir
 	remove := false
