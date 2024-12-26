@@ -107,8 +107,8 @@ func run() {
 
 	// This test should not run on Plan 9.
 	if runtime.GOOS != "plan9" && errors.Is(err, bbmain.ErrNotRegistered) {
-		if len(os.Args) > 1 {
-			os.Args = os.Args[1:]
+		if len(os.Args) > 2 && os.Args[1] == "#!"+os.Args[2] {
+			os.Args = os.Args[2:]
 			err = bbmain.Run(filepath.Base(os.Args[0]))
 		}
 	}
