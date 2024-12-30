@@ -54,8 +54,11 @@ func WithCompiler(p string) Opt {
 	}
 }
 
-// Returns a compiler command to be run in the environment.
-func (c Environ) compilerCmd(gocmd string, args ...string) *exec.Cmd {
+// CompilerCmd returns an exec.Cmd to run various commands, e.g.
+// go build, tinygo build, etc.
+// This is exported as external tests (e.g. u-root) need to be able to
+// run commands such as go tool.
+func (c Environ) CompilerCmd(gocmd string, args ...string) *exec.Cmd {
 	goBin := c.Compiler.Path
 	if "" == goBin {
 		goBin = filepath.Join(c.GOROOT, "bin", "go")
@@ -85,7 +88,7 @@ func (c *Environ) compilerAbs() error {
 	return nil
 }
 
-// Runs compilerCmd("version") and parse/caches output to c.Compiler.
+// Runs CompilerCmd("version") and parse/caches output to c.Compiler.
 func (c *Environ) CompilerInit() error {
 	if c.Compiler.IsInit {
 		return nil
@@ -93,7 +96,7 @@ func (c *Environ) CompilerInit() error {
 
 	c.compilerAbs()
 
-	cmd := c.compilerCmd("version")
+	cmd := c.CompilerCmd("version")
 	vb, err := cmd.CombinedOutput()
 	if err != nil {
 		return err
@@ -131,7 +134,7 @@ func (c *Environ) CompilerInit() error {
 
 		// Fetch additional go-build-tags from tinygo
 		// package fetch needs correct tags to prune
-		cmd := c.compilerCmd("info", "-json")
+		cmd := c.CompilerCmd("info", "-json")
 		infov, err := cmd.CombinedOutput()
 		if err != nil {
 			return err
@@ -235,7 +238,7 @@ func (c Environ) build(dirPath string, binaryPath string, pattern []string, opts
 
 	args = append(args, pattern...)
 
-	cmd := c.compilerCmd("build", args...)
+	cmd := c.CompilerCmd("build", args...)
 	if dirPath != "" {
 		cmd.Dir = dirPath
 	}
