@@ -191,3 +191,28 @@ jobs:
           fail_ci_if_error: true
           verbose: true
 
+
+  test-build-u-root:
+    name: test-build-u-root
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goversion: ['1.23']
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: ${{ matrix.goversion }}
+
+      - name: Test
+        run: |
+          git clone --depth 1 https://github.com/u-root/u-root
+          cd u-root
+          go work init
+          go work use ../src
+          go work use .
+          go build
+          ./u-root
+          go test -c
