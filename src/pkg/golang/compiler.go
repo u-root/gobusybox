@@ -54,6 +54,12 @@ func WithCompiler(p string) Opt {
 	}
 }
 
+// GoCmd runs a go command. It is used by, among other things, u-root testing
+// for such things as go tool.
+func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
+	return c.compilerCmd(gocmd, args...)
+}
+
 // Returns a compiler command to be run in the environment.
 func (c Environ) compilerCmd(gocmd string, args ...string) *exec.Cmd {
 	goBin := c.Compiler.Path
