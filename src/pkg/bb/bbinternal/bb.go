@@ -194,6 +194,9 @@ func importName(p *packages.Package, typePkgPath string) string {
 	if len(importName) > 0 {
 		return importName
 	}
+	if spl := strings.Split(typePkgPath, "/vendor/"); len(spl) > 1 {
+		return spl[len(spl)-1]
+	}
 	// It doesn't appear. We'll go import it.
 	return typePkgPath
 }
@@ -410,6 +413,15 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 
 // WritePkg writes p's files into destDir.
 func WritePkg(p *packages.Package, destDir string) error {
+	// TODO(hugelgupf):
+	// - join errors
+	// - seems a bit late to check for these errors, but works for now --
+	//   should check when these packages are queried? first used?
+	// - test
+	if len(p.Errors) > 0 {
+		return p.Errors[0]
+	}
+
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return err
 	}

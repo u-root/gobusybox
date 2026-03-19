@@ -4,9 +4,13 @@
 
 // Package findpkg finds packages from user-input strings that are either file
 // paths or Go package paths.
+//
+// findpkg supports globs and exclusions in addition to the normal `go list`
+// syntax, as described in the [NewPackage] documentation.
 package findpkg
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -14,142 +18,27 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hashicorp/go-multierror"
 	"github.com/u-root/gobusybox/src/pkg/bb/bbinternal"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
 	"golang.org/x/tools/go/packages"
+	"mvdan.cc/sh/v3/shell"
 )
 
-// modules returns a list of module directories => directories of packages
-// inside that module as well as packages that have no discernible module.
-//
-// The module for a package is determined by the **first** parent directory
-// that contains a go.mod.
-func modules(filesystemPaths []string) (map[string][]string, []string) {
-	// list of module directory => directories of packages it likely contains
-	moduledPackages := make(map[string][]string)
-	var noModulePkgs []string
-	for _, fullPath := range filesystemPaths {
-		components := strings.Split(fullPath, "/")
-
-		inModule := false
-		for i := len(components); i >= 1; i-- {
-			prefixPath := "/" + filepath.Join(components[:i]...)
-			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
-				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
-				inModule = true
-				break
-			}
-		}
-		if !inModule {
-			noModulePkgs = append(noModulePkgs, fullPath)
-		}
-	}
-	return moduledPackages, noModulePkgs
-}
-
-func loadRelative(moduleDir string, pkgDirs []string, loadFunc func(moduleDir string, dirs []string) error) error {
-	// Make all paths relative, because packages.Load/`go list -json` does
-	// not like absolute paths when what's being looked up is outside of
-	// GOPATH. It's fine though when those paths are relative to the PWD.
-	// Don't ask me why...
-	//
-	// E.g.
-	// * package $HOME/u-root/cmds/core/ip: -: import "$HOME/u-root/cmds/core/ip": cannot import absolute path
-	var relPkgDirs []string
-	for _, pkgDir := range pkgDirs {
-		relPkgDir, err := filepath.Rel(moduleDir, pkgDir)
-		if err != nil {
-			return fmt.Errorf("Go package path %s is not relative to directory %s: %v", pkgDir, moduleDir, err)
-		}
-
-		// N.B. `go list -json cmd/foo` is not the same as `go list -json ./cmd/foo`.
-		//
-		// The former looks for cmd/foo in $GOROOT or $GOPATH, while
-		// the latter looks in the relative directory ./cmd/foo.
-		relPkgDirs = append(relPkgDirs, "./"+relPkgDir)
-	}
-	return loadFunc(moduleDir, relPkgDirs)
-}
-
-// Find each packages' module, and batch package queries together by module.
-//
-// Query all packages that don't have a module at all together, as well.
-//
-// Batching these queries saves a *lot* of time; on the order of
-// several minutes for 30+ commands.
-func batchFSPackages(l ulog.Logger, absPaths []string, loadFunc func(moduleDir string, dirs []string) error) error {
-	mods, noModulePkgDirs := modules(absPaths)
-
-	for moduleDir, pkgDirs := range mods {
-		if err := loadRelative(moduleDir, pkgDirs, loadFunc); err != nil {
-			return err
-		}
-	}
-
-	if len(noModulePkgDirs) > 0 {
-		if err := loadRelative(noModulePkgDirs[0], noModulePkgDirs, loadFunc); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// We look up file system paths differently, because there is a big difference between
-//
-//	go list -json ../../foobar
-//
-// and
-//
-//	(cd ../../foobar && go list -json .)
-//
-// Namely, PWD determines which go.mod to use. We want each
-// package to use its own go.mod, if it has one.
-//
-// The easiest implementation would be to do (cd $packageDir && go list -json
-// .), however doing that N times is very expensive -- takes several minutes
-// for 30 packages. So here, we figure out every module involved and do one
-// query per module and one query for everything that isn't in a module.
-func batchLoadFSPackages(l ulog.Logger, env golang.Environ, absPaths []string) ([]*packages.Package, error) {
-	var allps []*packages.Package
-
-	err := batchFSPackages(l, absPaths, func(moduleDir string, packageDirs []string) error {
-		pkgs, err := loadPkgs(env, moduleDir, packageDirs...)
-		if err != nil {
-			return fmt.Errorf("could not find packages in module %s: %v", moduleDir, err)
-		}
-		for _, pkg := range pkgs {
-			allps, err = addPkg(l, allps, pkg)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return allps, nil
-}
-
-func addPkg(l ulog.Logger, plist []*packages.Package, p *packages.Package) ([]*packages.Package, error) {
+func addPkg(plist []*packages.Package, p *packages.Package) ([]*packages.Package, error) {
 	if len(p.Errors) > 0 {
 		var merr error
 		for _, e := range p.Errors {
-			merr = multierror.Append(merr, e)
+			merr = errors.Join(merr, e)
 		}
-		return plist, fmt.Errorf("failed to add package %v for errors: %v", p, merr)
+		return plist, fmt.Errorf("failed to add package %v for errors: %w", p, merr)
 	} else if len(p.GoFiles) > 0 {
 		plist = append(plist, p)
 	}
 	return plist, nil
 }
 
-func newPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string) ([]*packages.Package, error) {
-	var goImportPaths []string
-	var filesystemPaths []string
-
+func newPackages(l ulog.Logger, genv *golang.Environ, env Env, patterns ...string) ([]*packages.Package, error) {
 	// Two steps:
 	//
 	// 1. Resolve globs, filter packages with build constraints.
@@ -166,36 +55,18 @@ func newPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string
 	}
 
 	// Step 2.
-	for _, name := range paths {
-		// ResolveGlobs returns either an absolute file system path or
-		// a Go import path.
-		if strings.HasPrefix(name, "/") {
-			filesystemPaths = append(filesystemPaths, name)
-		} else {
-			goImportPaths = append(goImportPaths, name)
-		}
-	}
-
-	var ps []*packages.Package
-	if len(goImportPaths) > 0 {
-		importPkgs, err := loadPkgs(genv, env.WorkingDirectory, goImportPaths...)
-		if err != nil {
-			return nil, fmt.Errorf("failed to load package %v: %v", goImportPaths, err)
-		}
-		for _, p := range importPkgs {
-			ps, err = addPkg(l, ps, p)
-			if err != nil {
-				return nil, err
-			}
-		}
-	}
-
-	pkgs, err := batchLoadFSPackages(l, genv, filesystemPaths)
+	importPkgs, err := loadPkgs(genv, paths...)
 	if err != nil {
-		return nil, fmt.Errorf("could not load packages from file system: %v", err)
+		return nil, fmt.Errorf("failed to load package %v: %v", paths, err)
 	}
-	ps = append(ps, pkgs...)
-	return ps, nil
+	var pkgs []*packages.Package
+	for _, p := range importPkgs {
+		pkgs, err = addPkg(pkgs, p)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return pkgs, nil
 }
 
 // NewPackages collects package metadata about all named packages.
@@ -205,6 +76,10 @@ func newPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string
 // It skips directories that do not have Go files subject to the build
 // constraints in env and logs a "Skipping package {}" statement about such
 // directories/packages.
+//
+// All given names have to be resolvable by GOPATH or by Go modules. Generally,
+// if `go list <name>` works, it should work here. (Except go list does not
+// support globs or exclusions.)
 //
 // Allowed formats for names:
 //
@@ -246,7 +121,10 @@ func newPackages(l ulog.Logger, genv golang.Environ, env Env, patterns ...string
 //   - GBB_PATH=$HOME/u-root:$HOME/yourproject cmds/core/* cmd/foobar
 //
 //   - UROOT_SOURCE=$HOME/u-root github.com/u-root/u-root/cmds/core/ip
-func NewPackages(l ulog.Logger, genv golang.Environ, env Env, names ...string) ([]*bbinternal.Package, error) {
+func NewPackages(l ulog.Logger, genv *golang.Environ, env Env, names ...string) ([]*bbinternal.Package, error) {
+	if genv == nil {
+		return nil, fmt.Errorf("Go build environment must be specified")
+	}
 	ps, err := newPackages(l, genv, env, names...)
 	if err != nil {
 		return nil, err
@@ -259,49 +137,9 @@ func NewPackages(l ulog.Logger, genv golang.Environ, env Env, names ...string) (
 	return ips, nil
 }
 
-func loadPkgs(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedImports | packages.NeedFiles | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedCompiledGoFiles | packages.NeedModule | packages.NeedEmbedFiles,
-		Env:  append(os.Environ(), env.Env()...),
-		Dir:  dir,
-	}
-	return packages.Load(cfg, patterns...)
-}
-
-func filterDirectoryPaths(l ulog.Logger, env golang.Environ, directories []string, excludes []string) ([]string, error) {
-	// Eligibility check: does each directory contain files that are
-	// compilable under the current GOROOT/GOPATH/GOOS/GOARCH and build
-	// tags?
-	//
-	// We filter this out first, because while packages.Load will give us
-	// an error for this, it is not distinguishable from other errors. We
-	// would like to give only a warning for these.
-	//
-	// This eligibility check requires Go 1.15, as before Go 1.15 the
-	// package loader would return an error "cannot find package" for
-	// packages not meeting build constraints.
-	var allps []*packages.Package
-	err := batchFSPackages(l, directories, func(moduleDir string, packageDirs []string) error {
-		pkgs, err := lookupPkgNameAndFiles(env, moduleDir, packageDirs...)
-		if err != nil {
-			return fmt.Errorf("could not look up packages %q: %v", packageDirs, err)
-		}
-		allps = append(allps, pkgs...)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	eligiblePkgs, err := checkEligibility(l, allps)
-	if err != nil {
-		return nil, err
-	}
-	var paths []string
-	for _, p := range eligiblePkgs {
-		paths = append(paths, filepath.Dir(p.GoFiles[0]))
-	}
-	return excludePaths(paths, excludes), nil
+func loadPkgs(env *golang.Environ, patterns ...string) ([]*packages.Package, error) {
+	mode := packages.NeedName | packages.NeedImports | packages.NeedFiles | packages.NeedDeps | packages.NeedTypes | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedCompiledGoFiles | packages.NeedModule | packages.NeedEmbedFiles
+	return env.Lookup(mode, patterns...)
 }
 
 func checkEligibility(l ulog.Logger, pkgs []*packages.Package) ([]*packages.Package, error) {
@@ -324,7 +162,7 @@ func checkEligibility(l ulog.Logger, pkgs []*packages.Package) ([]*packages.Pack
 			// we're not returning early because we want to give
 			// the user as much information as possible.
 			for _, e := range p.Errors {
-				merr = multierror.Append(merr, fmt.Errorf("package %s: %w", p.PkgPath, e))
+				merr = errors.Join(merr, fmt.Errorf("package %s: %w", p.PkgPath, e))
 			}
 		}
 	}
@@ -350,13 +188,8 @@ func excludePaths(paths []string, exclusions []string) []string {
 }
 
 // Just looking up the stuff that doesn't take forever to parse.
-func lookupPkgNameAndFiles(env golang.Environ, dir string, patterns ...string) ([]*packages.Package, error) {
-	cfg := &packages.Config{
-		Mode: packages.NeedName | packages.NeedFiles,
-		Env:  append(os.Environ(), env.Env()...),
-		Dir:  dir,
-	}
-	return packages.Load(cfg, patterns...)
+func lookupPkgNameAndFiles(env *golang.Environ, patterns ...string) ([]*packages.Package, error) {
+	return env.Lookup(packages.NeedName|packages.NeedFiles, patterns...)
 }
 
 func couldBeGlob(s string) bool {
@@ -367,7 +200,7 @@ func couldBeGlob(s string) bool {
 // Go command paths. It may return a list that contains errors.
 //
 // Precondition: couldBeGlob(pattern) is true
-func lookupPkgsWithGlob(env golang.Environ, wd string, pattern string) ([]*packages.Package, error) {
+func lookupPkgsWithGlob(env *golang.Environ, pattern string) ([]*packages.Package, error) {
 	elems := strings.Split(pattern, "/")
 
 	globIndex := 0
@@ -380,7 +213,7 @@ func lookupPkgsWithGlob(env golang.Environ, wd string, pattern string) ([]*packa
 
 	nonGlobPath := strings.Join(append(elems[:globIndex], "..."), "/")
 
-	pkgs, err := lookupPkgNameAndFiles(env, wd, nonGlobPath)
+	pkgs, err := lookupPkgNameAndFiles(env, nonGlobPath)
 	if err != nil {
 		return nil, fmt.Errorf("%q is neither package or path/glob -- could not lookup %q (import path globs have to be within modules): %v", pattern, nonGlobPath, err)
 	}
@@ -400,7 +233,7 @@ func lookupPkgsWithGlob(env golang.Environ, wd string, pattern string) ([]*packa
 // lookupCompilablePkgsWithGlob resolves Go package path globs to a realized
 // list of Go command paths. It filters out packages that have no files
 // matching our build constraints and other errors.
-func lookupCompilablePkgsWithGlob(l ulog.Logger, env golang.Environ, wd string, patterns ...string) ([]string, error) {
+func lookupCompilablePkgsWithGlob(l ulog.Logger, env *golang.Environ, patterns ...string) ([]string, error) {
 	var pkgs []*packages.Package
 	// Batching saves time. Patterns with globs cannot be batched.
 	//
@@ -410,7 +243,7 @@ func lookupCompilablePkgsWithGlob(l ulog.Logger, env golang.Environ, wd string, 
 	var batchedPatterns []string
 	for _, pattern := range patterns {
 		if couldBeGlob(pattern) {
-			ps, err := lookupPkgsWithGlob(env, wd, pattern)
+			ps, err := lookupPkgsWithGlob(env, pattern)
 			if err != nil {
 				return nil, err
 			}
@@ -420,7 +253,7 @@ func lookupCompilablePkgsWithGlob(l ulog.Logger, env golang.Environ, wd string, 
 		}
 	}
 	if len(batchedPatterns) > 0 {
-		ps, err := lookupPkgNameAndFiles(env, wd, batchedPatterns...)
+		ps, err := lookupPkgNameAndFiles(env, batchedPatterns...)
 		if err != nil {
 			return nil, err
 		}
@@ -438,13 +271,13 @@ func lookupCompilablePkgsWithGlob(l ulog.Logger, env golang.Environ, wd string, 
 	return paths, nil
 }
 
-func filterGoPaths(l ulog.Logger, env golang.Environ, wd string, gopathIncludes, gopathExcludes []string) ([]string, error) {
-	goInc, err := lookupCompilablePkgsWithGlob(l, env, wd, gopathIncludes...)
+func filterGoPaths(l ulog.Logger, env *golang.Environ, gopathIncludes, gopathExcludes []string) ([]string, error) {
+	goInc, err := lookupCompilablePkgsWithGlob(l, env, gopathIncludes...)
 	if err != nil {
 		return nil, err
 	}
 
-	goExc, err := lookupCompilablePkgsWithGlob(l, env, wd, gopathExcludes...)
+	goExc, err := lookupCompilablePkgsWithGlob(l, env, gopathExcludes...)
 	if err != nil {
 		return nil, err
 	}
@@ -453,15 +286,16 @@ func filterGoPaths(l ulog.Logger, env golang.Environ, wd string, gopathIncludes,
 
 var errNoMatch = fmt.Errorf("no Go commands match the given patterns")
 
-func findDirectoryMatches(l ulog.Logger, env Env, pattern string) (bool, []string) {
-	prefixes := append([]string{""}, env.GBBPath...)
+// Glob evaluates the given pattern.
+func (e Env) Glob(l ulog.Logger, pattern string) (isPath bool, absPaths []string) {
+	prefixes := append([]string{""}, e.GBBPath...)
 
 	// Special sauce for backwards compatibility with old u-root behavior:
 	// if urootSource is set, try to catch Go package paths and convert
 	// them to file system lookups.
-	if len(env.URootSource) > 0 {
+	if len(e.URootSource) > 0 {
 		// Prefer urootSource to gbbPaths in this case.
-		prefixes = append([]string{"", env.URootSource}, env.GBBPath...)
+		prefixes = append([]string{"", e.URootSource}, e.GBBPath...)
 		pattern = strings.TrimPrefix(pattern, "github.com/u-root/u-root/")
 	}
 
@@ -516,15 +350,10 @@ type Env struct {
 	//
 	// The default is to use UROOT_SOURCE env var.
 	URootSource string
-
-	// WorkingDirectory is the directory used for module-enabled `go list`
-	// lookups. The go.mod in this directory (or one of its parents) is
-	// used to resolve Go package paths.
-	WorkingDirectory string
 }
 
 func (e Env) String() string {
-	return fmt.Sprintf("GBB_PATH=%s UROOT_SOURCE=%s PWD=%s", strings.Join(e.GBBPath, ":"), e.URootSource, e.WorkingDirectory)
+	return fmt.Sprintf("GBB_PATH=%s UROOT_SOURCE=%s", strings.Join(e.GBBPath, ":"), e.URootSource)
 }
 
 // DefaultEnv is the default environment derived from environment variables and
@@ -537,63 +366,132 @@ func DefaultEnv() Env {
 		gbbPaths = strings.Split(gbbPath, ":")
 	}
 	return Env{
-		GBBPath:          gbbPaths,
-		URootSource:      os.Getenv("UROOT_SOURCE"),
-		WorkingDirectory: "",
+		GBBPath:     gbbPaths,
+		URootSource: os.Getenv("UROOT_SOURCE"),
 	}
+}
+
+func splitExclusions(patterns []string) (include []string, exclude []string) {
+	for _, pattern := range patterns {
+		isExclude := strings.HasPrefix(pattern, "-")
+		if isExclude {
+			exclude = append(exclude, pattern[1:])
+		} else {
+			include = append(include, pattern)
+		}
+	}
+	return
+}
+
+func expand(patterns []string) []string {
+	var p []string
+	for _, pattern := range patterns {
+		fields, err := shell.Fields(pattern, func(_ string) string {
+			return ""
+		})
+		if err != nil {
+			p = append(p, pattern)
+		} else {
+			p = append(p, fields...)
+		}
+	}
+	return p
+}
+
+func glob(l ulog.Logger, env Env, patterns []string) []string {
+	var ret []string
+	for _, pattern := range patterns {
+		if match, directories := env.Glob(l, pattern); len(directories) > 0 {
+			ret = append(ret, directories...)
+		} else if !match {
+			ret = append(ret, pattern)
+		}
+	}
+	return ret
 }
 
 // ResolveGlobs takes a list of Go paths and directories that may
 // include globs and returns a valid list of Go commands (either addressed by
 // Go package path or directory path).
 //
-// It returns only directories that have Go files subject to
+// It returns only packages that have Go files subject to
 // the build constraints in env and logs a "Skipping package {}" statement
 // about packages that are excluded due to build constraints.
 //
-// ResolveGlobs always returns either an absolute file system path and
-// normalized Go package paths. The return list may be mixed.
+// ResolveGlobs always returns normalized Go package paths.
+//
+// ResolveGlobs should work in all cases that `go list` works.
 //
 // See NewPackages for allowed formats.
-func ResolveGlobs(logger ulog.Logger, genv golang.Environ, env Env, patterns []string) ([]string, error) {
-	var dirIncludes []string
-	var dirExcludes []string
-	var gopathIncludes []string
-	var gopathExcludes []string
-	for _, pattern := range patterns {
-		isExclude := strings.HasPrefix(pattern, "-")
-		if isExclude {
-			pattern = pattern[1:]
-		}
-		if hasFileMatch, directories := findDirectoryMatches(logger, env, pattern); len(directories) > 0 {
-			if !isExclude {
-				dirIncludes = append(dirIncludes, directories...)
-			} else {
-				dirExcludes = append(dirExcludes, directories...)
-			}
-		} else if !hasFileMatch {
-			if !isExclude {
-				gopathIncludes = append(gopathIncludes, pattern)
-			} else {
-				gopathExcludes = append(gopathExcludes, pattern)
-			}
-		}
+func ResolveGlobs(l ulog.Logger, genv *golang.Environ, env Env, patterns []string) ([]string, error) {
+	if genv == nil {
+		return nil, fmt.Errorf("Go build environment must be specified")
 	}
+	includes, excludes := splitExclusions(patterns)
+	includes = glob(l, env, expand(includes))
+	excludes = glob(l, env, expand(excludes))
 
-	directories, err := filterDirectoryPaths(logger, genv, dirIncludes, dirExcludes)
+	paths, err := filterGoPaths(l, genv, includes, excludes)
 	if err != nil {
+		if strings.Contains(err.Error(), "go.mod file not found") {
+			return nil, fmt.Errorf("%w: gobusybox has removed previous multi-module functionality in favor of Go workspaces -- read https://github.com/u-root/gobusybox#path-resolution--multi-module-builds for more", err)
+		}
 		return nil, err
 	}
 
-	gopaths, err := filterGoPaths(logger, genv, env.WorkingDirectory, gopathIncludes, gopathExcludes)
-	if err != nil {
-		return nil, err
-	}
-
-	result := append(directories, gopaths...)
-	if len(result) == 0 {
+	if len(paths) == 0 {
 		return nil, errNoMatch
 	}
-	sort.Strings(result)
-	return result, nil
+	sort.Strings(paths)
+	return paths, nil
+}
+
+// Modules returns a list of module directories => directories of packages
+// inside that module as well as packages that have no discernible module.
+//
+// The module for a package is determined by the **first** parent directory
+// that contains a go.mod.
+func Modules(paths []string) (map[string][]string, []string) {
+	// list of module directory => directories of packages it likely contains
+	moduledPackages := make(map[string][]string)
+	var noModulePkgs []string
+	for _, fullPath := range paths {
+		components := strings.Split(fullPath, "/")
+
+		inModule := false
+		for i := len(components); i >= 1; i-- {
+			prefixPath := "/" + filepath.Join(components[:i]...)
+			if _, err := os.Stat(filepath.Join(prefixPath, "go.mod")); err == nil {
+				moduledPackages[prefixPath] = append(moduledPackages[prefixPath], fullPath)
+				inModule = true
+				break
+			}
+		}
+		if !inModule {
+			noModulePkgs = append(noModulePkgs, fullPath)
+		}
+	}
+	return moduledPackages, noModulePkgs
+}
+
+func globPaths(l ulog.Logger, env Env, patterns []string) []string {
+	var ret []string
+	for _, pattern := range patterns {
+		if match, directories := env.Glob(l, pattern); len(directories) > 0 {
+			ret = append(ret, directories...)
+		} else if !match {
+			l.Printf("No match found for %v", pattern)
+		}
+	}
+	return ret
+}
+
+// GlobPaths resolves file path globs in env with exclusions and shell
+// expansions.
+func GlobPaths(l ulog.Logger, env Env, patterns ...string) []string {
+	includes, excludes := splitExclusions(patterns)
+	includes = globPaths(l, env, expand(includes))
+	excludes = globPaths(l, env, expand(excludes))
+	paths := excludePaths(includes, excludes)
+	return paths
 }

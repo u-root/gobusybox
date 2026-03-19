@@ -1,12 +1,17 @@
 module github.com/u-root/gobusybox/src
 
-go 1.13
+go 1.25.0
 
 require (
-	github.com/google/goterm v0.0.0-20200907032337-555d40f16ae2
-	github.com/hashicorp/go-multierror v1.1.1
-	github.com/u-root/uio v0.0.0-20210528151154-e40b768296a7
-	golang.org/x/mod v0.6.0-dev.0.20220106191415-9b9b3d81d5e3
-	golang.org/x/sys v0.0.0-20211019181941-9d821ace8654
-	golang.org/x/tools v0.1.11-0.20220322213029-87a8611856c1
+	github.com/dustin/go-humanize v1.0.1
+	github.com/hashicorp/go-version v1.8.0
+	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701
+	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90
+	golang.org/x/tools v0.43.0
+	mvdan.cc/sh/v3 v3.13.0
+)
+
+require (
+	golang.org/x/mod v0.34.0 // indirect
+	golang.org/x/sync v0.20.0 // indirect
 )

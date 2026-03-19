@@ -1,0 +1,10 @@
+# github.com/u-root/u-root v0.11.0
+## explicit; go 1.19
+github.com/u-root/u-root/pkg/align
+github.com/u-root/u-root/pkg/strace
+github.com/u-root/u-root/pkg/strace/internal/abi
+github.com/u-root/u-root/pkg/strace/internal/binary
+github.com/u-root/u-root/pkg/ubinary
+# golang.org/x/sys v0.15.0
+## explicit; go 1.18
+golang.org/x/sys/unix

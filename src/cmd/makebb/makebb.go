@@ -6,13 +6,13 @@
 package main
 
 import (
-	"errors"
 	"flag"
 	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
 
+	"github.com/dustin/go-humanize"
 	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 )
@@ -21,11 +21,14 @@ var (
 	outputPath = flag.String("o", "bb", "Path to compiled busybox binary")
 	genDir     = flag.String("gen-dir", "", "Directory to generate source in")
 	genOnly    = flag.Bool("g", false, "Generate but do not build binaries")
+	keep       = flag.Bool("k", false, "Keep generated source temporary directory")
 )
 
 func main() {
 	bopts := &golang.BuildOpts{}
 	bopts.RegisterFlags(flag.CommandLine)
+	env := golang.Default()
+	env.RegisterFlags(flag.CommandLine)
 	flag.Parse()
 
 	// Why doesn't the log package export this as a default?
@@ -36,12 +39,18 @@ func main() {
 		l.Fatal(err)
 	}
 
-	env := golang.Default()
 	if env.CgoEnabled {
 		l.Printf("Disabling CGO for u-root...")
 		env.CgoEnabled = false
 	}
-	l.Printf("Build environment: %s", env)
+
+	err = env.CompilerInit()
+	if err != nil {
+		l.Fatal(err)
+	}
+
+	l.Printf("Build environment: %s\n", env)
+	l.Printf("Compiler: %s\n", env.Compiler.VersionOutput)
 
 	tmpDir := *genDir
 	remove := false
@@ -63,21 +72,27 @@ func main() {
 		GenerateOnly: *genOnly,
 	}
 	if err := bb.BuildBusybox(l, opts); err != nil {
-		l.Print(err)
-		var errGopath *bb.ErrGopathBuild
-		var errGomod *bb.ErrModuleBuild
-		if errors.As(err, &errGopath) {
-			l.Fatalf("Preserving bb generated source directory at %s due to error. To reproduce build, `cd %s` and `GO111MODULE=off GOPATH=%s go build`.", tmpDir, errGopath.CmdDir, errGopath.GOPATH)
-		} else if errors.As(err, &errGomod) {
-			l.Fatalf("Preserving bb generated source directory at %s due to error. To debug build, `cd %s` and use `go build` to build, or `go mod [why|tidy|graph]` to debug dependencies, or `go list -m all` to list all dependency versions.", tmpDir, errGomod.CmdDir)
-		} else {
-			l.Fatalf("Preserving bb generated source directory at %s due to error.", tmpDir)
-		}
+		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)
+		// Only remove temp dir if there was no error.
+		remove = false
 	} else if opts.GenerateOnly {
 		l.Printf("Generated source can be found in %s. `cd %s && go build` to build.", tmpDir, filepath.Join(tmpDir, "src/bb.u-root.com/bb"))
 	}
-	// Only remove temp dir if there was no error.
-	if remove && !opts.GenerateOnly {
+	if remove && !opts.GenerateOnly && !*keep {
 		os.RemoveAll(tmpDir)
+	} else {
+		l.Printf("Keeping temp dir %v", tmpDir)
+	}
+
+	path := *outputPath
+	if stat, err := os.Stat(path); err == nil {
+		if stat.IsDir() {
+			path = filepath.Join(path, "bb")
+			stat, err = os.Stat(path)
+			if err != nil {
+				return
+			}
+		}
+		l.Printf("Successfully built %q (size %d bytes -- %s).", path, stat.Size(), humanize.IBytes(uint64(stat.Size())))
 	}
 }

@@ -14,89 +14,9 @@ templates:
       - CGO_ENABLED: 0
       - GO111MODULE: "auto"
 
-  go115-template: &go115-template
+  go122-template: &go122-template
     docker:
-      - image: cimg/go:1.15
-
-  go116-template: &go116-template
-    docker:
-      - image: cimg/go:1.16
-
-  go117-template: &go117-template
-    docker:
-      - image: cimg/go:1.17
-
-  go118-template: &go118-template
-    docker:
-      - image: cimg/go:1.18
-
-  go119-template: &go119-template
-    docker:
-      - image: cimg/go:1.19
-
-  go120-template: &go120-template
-    docker:
-      - image: cimg/go:1.20
-
-  bazel-template: &bazel-template
-    docker:
-      - image: us-docker.pkg.dev/u-root-ci/gobusybox/test-bazel:v0.0.1
-    working_directory: /home/circleci/go/bazel_gobusybox
-    environment:
-      - GOPATH: "/home/circleci/go"
-    resource_class: large
-
-  build-gomod-template: &build-gomod-template
-    steps:
-      - checkout
-      - run:
-          name: individual commands & packages build
-          command: |
-            (cd src && go build ./...)
-            (cd test/diamonddep/mod1 && go build ./...)
-            # test/diamonddep/mod2 doesn't build on its own due to mutual
-            # dependency.
-            (cd test/diamonddep/mod3 && go build ./...)
-            (cd test/normaldeps/mod1 && go build ./...)
-            (cd test/normaldeps/mod2 && go build ./...)
-            (cd test/requestconflict/mod5 && go build ./...)
-            (cd test/requestconflict/mod6 && go build ./...)
-            (cd test/nested && go build ./...)
-            (cd test/nested/nestedmod && go build ./...)
-      - run:
-          name: tests
-          command: ./gobuilds.sh
-      - run:
-          name: build gokrazy & p9 together
-          command: ./test-multi-simple.sh
-
-  build-gomod-multi-template: &build-gomod-multi-template
-    steps:
-      - checkout
-      - run:
-          name: build u-root & gokrazy & p9 together
-          command: ./test-external.sh
-
-  build-gopath-template: &build-gopath-template
-    steps:
-      - checkout
-      - run:
-          name: go env
-          command: go env
-      - run:
-          name: gobuilds-gopath
-          command: ./gobuilds-gopath.sh
-
-  test-template: &test-template
-    steps:
-      - checkout
-      - run:
-          name: go env
-          command: go env
-      - run:
-          name: test
-          command: ./gotest.sh
-
+      - image: cimg/go:1.22
 
 workflows:
   version: 2
@@ -104,195 +24,20 @@ workflows:
     jobs:
       - clean-gopath
       - clean-gomod
-      - clean-makebb
-      - clean-bazel
-      - build-gopath-go117:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go118:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go119:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - build-gopath-go120:
-          requires:
-            - clean-makebb
-            - clean-gopath
-      - test-go117:
-          requires:
-            - clean-makebb
-            - clean-gopath
-            - clean-gomod
-      - test-go118:
-          requires:
-            - clean-makebb
-            - clean-gopath
-            - clean-gomod
-      - test-go119:
-          requires:
-            - clean-makebb
-            - clean-gopath
-            - clean-gomod
-      - test-go120:
-          requires:
-            - clean-makebb
-            - clean-gopath
-            - clean-gomod
-      - build-gomod-go117:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-go118:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-go119:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-go120:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go117:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go118:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go119:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-gomod-multi-go120:
-          requires:
-            - clean-makebb
-            - clean-gomod
-      - build-bazel:
-          requires:
-            - clean-bazel
-      - build-bazel-cross:
-          requires:
-            - clean-bazel
-      - build-bazel-test:
-          requires:
-            - clean-bazel
-  nightly:
-    triggers:
-      - schedule:
-          cron: "0 0 * * *"
-          filters:
-            branches:
-              only:
-                - main
-    jobs:
-      - build-gopath-go117
-      - build-gopath-go118
-      - build-gopath-go119
-      - build-gopath-go120
-      - test-go117
-      - test-go118
-      - test-go119
-      - test-go120
-      - build-gomod-go117
-      - build-gomod-go118
-      - build-gomod-go119
-      - build-gomod-go120
-      - build-gomod-multi-go117
-      - build-gomod-multi-go118
-      - build-gomod-multi-go119
-      - build-gomod-multi-go120
-      - build-bazel
-      - build-bazel-cross
-      - build-bazel-test
 
 jobs:
-  clean-makebb:
-    <<: [*go120-template, *gomod-template]
-    steps:
-      - checkout
-      - run:
-          name: check generated code
-          command: |
-            mkdir -p /home/circleci/go/bin
-            go build ./src/cmd/embedvar
-            cp ./embedvar $GOPATH/bin
-            export PATH=$GOPATH/bin:$PATH
-            cd src/pkg/bb
-            go generate
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'Generated bbmain code is out of date. Run `go install ./src/cmd/embevar && cd src/pkg/bb && go generate` and then check changes in git.'
-              git status --porcelain .
-              git diff
-              exit 1
-            fi
-
   clean-gopath:
-    <<: [*go120-template, *gopath-template]
+    <<: [*go122-template, *gopath-template]
     steps:
       - checkout
-      - run:
-          name: Install dep
-          command: |
-            wget https://github.com/golang/dep/releases/download/v0.5.4/dep-linux-amd64
-            mv dep-linux-amd64 dep
-            chmod +x dep
-      - run:
-          name: Check vendored deps
-          command: |
-            cd vendortest
-            ../dep version
-            ../dep status
-            ../dep ensure -vendor-only
-            git status
-            if [[ -n "$(git status --porcelain vendor)" ]]; then
-              echo 'vendor/ is out-of-date: run `cd vendortest && dep ensure -vendor-only` and then check in the changes'
-              echo 'If `cd vendortest && dep ensure` results in no changes, make sure you are using the latest relase of dep'
-              git status --porcelain vendor
-              exit 1
-            fi
-      - run:
-          name: vet
-          command: go vet ./vendortest/...
       - run:
           name: gofmt
           command: |
             cd vendortest
             test -z "$(gofmt -s -l $(find -name '*.go' | grep -v /vendor/))"
 
-  build-gopath-go117:
-    <<: [*go117-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go118:
-    <<: [*go118-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go119:
-    <<: [*go119-template, *gopath-template, *build-gopath-template]
-
-  build-gopath-go120:
-    <<: [*go120-template, *gopath-template, *build-gopath-template]
-
-  test-go117:
-    <<: [*go117-template, *gopath-template, *test-template]
-
-  test-go118:
-    <<: [*go118-template, *gopath-template, *test-template]
-
-  test-go119:
-    <<: [*go119-template, *gopath-template, *test-template]
-
-  test-go120:
-    <<: [*go120-template, *gopath-template, *test-template]
-
   clean-gomod:
-    <<: [*go120-template, *gomod-template]
+    <<: [*go122-template, *gomod-template]
     steps:
       - checkout
       - run:
@@ -300,6 +45,7 @@ jobs:
           command: |
             (cd src && go mod tidy && go mod verify)
             (cd test && go mod tidy && go mod verify)
+            (cd vendortest && go mod tidy && go mod verify)
             (cd test/diamonddep/mod1 && go mod tidy && go mod verify)
             # NOTE: Specifically do NOT tidy test/diamondeps/mod2. It doesn't
             # build on its own locally due to the mutual dependency; and we do
@@ -309,8 +55,6 @@ jobs:
             (cd test/goembed && go mod tidy && go mod verify)
             (cd test/normaldeps/mod1 && go mod tidy && go mod verify)
             (cd test/normaldeps/mod2 && go mod tidy && go mod verify)
-            (cd test/requestconflict/mod5 && go mod tidy && go mod verify)
-            (cd test/requestconflict/mod6 && go mod tidy && go mod verify)
             (cd test/nested && go mod tidy && go mod verify)
             (cd test/nested/nestedmod && go mod tidy && go mod verify)
             git status
@@ -332,8 +76,6 @@ jobs:
             (cd test/goembed && go vet ./...)
             (cd test/normaldeps/mod1 && go vet ./...)
             (cd test/normaldeps/mod2 && go vet ./...)
-            (cd test/requestconflict/mod5 && go vet ./...)
-            (cd test/requestconflict/mod6 && go vet ./...)
             (cd test/nested && go vet ./...)
             (cd test/nested/nestedmod && go vet ./...)
       - run:
@@ -342,101 +84,3 @@ jobs:
             (cd src && test -z "$(gofmt -s -l $(find -name '*.go'))")
             (cd test && test -z "$(gofmt -s -l $(find -name '*.go'))")
 
-  build-gomod-go117:
-    <<: [*go117-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go118:
-    <<: [*go118-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go119:
-    <<: [*go119-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-go120:
-    <<: [*go120-template, *gomod-template, *build-gomod-template]
-
-  build-gomod-multi-go117:
-    <<: [*go117-template, *gomod-template, *build-gomod-multi-template]
-
-  build-gomod-multi-go118:
-    <<: [*go118-template, *gomod-template, *build-gomod-multi-template]
-
-  build-gomod-multi-go119:
-    <<: [*go119-template, *gomod-template, *build-gomod-multi-template]
-
-  build-gomod-multi-go120:
-    <<: [*go120-template, *gomod-template, *build-gomod-multi-template]
-
-  clean-bazel:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run:
-          name: run gazelle
-          command: |
-            bazel run :gazelle
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `bazel run :gazelle` and then check in the changes'
-              git status --porcelain .
-              exit 1
-            fi
-      - run:
-          name: sync bazel deps.bzl with src/go.mod
-          command: |
-            bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies
-            git status
-            if [[ -n "$(git status --porcelain deps.bzl)" ]]; then
-              echo 'go.mod deps are out of sync with deps.bzl: run '
-              echo '  bazel run //:gazelle -- update-repos -from_file=src/go.mod -to_macro=deps.bzl%go_dependencies'
-              echo 'and then check in the changes in deps.bzl'
-              git status --porcelain .
-              exit 1
-            fi
-
-      - run:
-          name: run buildifier
-          command: |
-            bazel run :buildifier -- -r .
-            # For some reason, running buildifier or gazelle updates go.sum.
-            git checkout -- src/go.sum
-            git status
-            if [[ -n "$(git status --porcelain .)" ]]; then
-              echo 'BUILD files are out-of-date: run `bazel run :buildifier -- -r .` and then check in the changes'
-              git status --porcelain .
-              exit 1
-            fi
-
-  build-bazel:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run:
-          name: build busybox
-          command: |
-            bazel build //src:bb
-            ./bazel-bin/src/bb_/bb helloworld
-      - run:
-          name: build everything (amd64)
-          command: bazel build //src/...
-
-  build-bazel-cross:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run:
-          name: bazel cross-compile
-          command: |
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm64 //src:bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_arm //src:bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:uroot_bb
-            bazel build --platforms=@io_bazel_rules_go//go/toolchain:linux_riscv64 //src:bb
-
-  build-bazel-test:
-    <<: *bazel-template
-    steps:
-      - checkout
-      - run:
-          name: bazel test
-          command: bazel query 'tests(//src/...) except attr(tags, notest, //src/...)' | xargs bazel test

@@ -2,3 +2,7 @@
 /makebb
 /bb2
 bazel-*
+
+# for now
+MODULE.bazel
+MODULE.bazel.lock

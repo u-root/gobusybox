@@ -302,6 +302,9 @@ func (i *Importer) Import(importPath string) (*types.Package, error) {
 	if err != nil {
 		return nil, err
 	}
+	// TODO: gcexportdata format changed from Go 1.19 to Go 1.20. Vendored
+	// packages now show up as
+	// github.com/u-root/u-root/vendor/github.com/rck/unit even in bazel.
 	return gcexportdata.Read(r, i.fset, i.imports, importPath)
 }
 
