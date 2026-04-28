@@ -408,106 +408,6 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	return hasMain
 }
 
-// ambiguousImportDir parses an "ambiguous import" error message and returns
-// the directory of the most specific module that provides the package.
-//
-// When a package exists in multiple modules (e.g. both google.golang.org/genproto
-// and its sub-module google.golang.org/genproto/googleapis/rpc), Go reports an
-// "ambiguous import" error. In GOPATH mode (used for the final busybox build),
-// there is no such ambiguity, so we resolve it by picking the module whose path
-// is the longest prefix of the package path (i.e. the most specific sub-module).
-//
-// Returns ("", nil) if none of the errors are ambiguous import errors.
-func ambiguousImportDir(pkgPath string, errs []packages.Error) (string, error) {
-	for _, e := range errs {
-		if !strings.HasPrefix(e.Msg, "ambiguous import:") {
-			continue
-		}
-
-		// Error message format:
-		//   ambiguous import: found package P in multiple modules:
-		//     M1 v1 (dir1)
-		//     M2 v2 (dir2)
-		lines := strings.Split(e.Msg, "\n")
-		type candidate struct {
-			modPath string
-			dir     string
-		}
-		var candidates []candidate
-		for _, line := range lines[1:] {
-			line = strings.TrimSpace(line)
-			if line == "" {
-				continue
-			}
-			// Each line has the form: "modulepath version (directory)"
-			openParen := strings.LastIndex(line, " (")
-			closeParen := strings.LastIndex(line, ")")
-			if openParen < 0 || closeParen <= openParen+1 {
-				continue
-			}
-			dir := line[openParen+2 : closeParen]
-			modPart := strings.TrimSpace(line[:openParen])
-			// modPart: "modulepath version"; version is the last space-separated word
-			spaceIdx := strings.LastIndex(modPart, " ")
-			if spaceIdx < 0 {
-				continue
-			}
-			modPath := modPart[:spaceIdx]
-			candidates = append(candidates, candidate{modPath: modPath, dir: dir})
-		}
-
-		if len(candidates) == 0 {
-			return "", nil
-		}
-
-		// Choose the candidate whose module path is the longest prefix of pkgPath.
-		// This prefers sub-modules (e.g. google.golang.org/genproto/googleapis/rpc)
-		// over monolithic parent modules (e.g. google.golang.org/genproto).
-		best := ""
-		bestLen := -1
-		for _, c := range candidates {
-			if strings.HasPrefix(pkgPath+"/", c.modPath+"/") && len(c.modPath) > bestLen {
-				bestLen = len(c.modPath)
-				best = c.dir
-			}
-		}
-		if best == "" {
-			// Fall back to the first candidate if none had a matching prefix.
-			best = candidates[0].dir
-		}
-		return best, nil
-	}
-	return "", nil
-}
-
-// copyDirGoFiles copies Go source files and assembly files from srcDir into
-// destDir. It skips test files (_test.go) and non-source files.
-func copyDirGoFiles(srcDir, destDir string) error {
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-	entries, err := os.ReadDir(srcDir)
-	if err != nil {
-		return fmt.Errorf("reading directory %q: %w", srcDir, err)
-	}
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-		name := entry.Name()
-		if strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		if !strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, ".s") {
-			continue
-		}
-		if err := cp.Copy(filepath.Join(srcDir, name), filepath.Join(destDir, name)); err != nil {
-			return fmt.Errorf("copy %s: %w", name, err)
-		}
-	}
-	return nil
-}
-
 // WritePkg writes p's files into destDir.
 func WritePkg(p *packages.Package, destDir string) error {
 	// TODO(hugelgupf):
@@ -516,16 +416,6 @@ func WritePkg(p *packages.Package, destDir string) error {
 	//   should check when these packages are queried? first used?
 	// - test
 	if len(p.Errors) > 0 {
-		// "Ambiguous import" errors occur when a package is provided by multiple
-		// modules in the dependency graph. In GOPATH mode (used for the final
-		// busybox compilation), there is no ambiguity since each import path maps
-		// to exactly one directory. Resolve the ambiguity by copying files from
-		// the most specific module (longest module-path prefix of the package path).
-		if dir, err := ambiguousImportDir(p.PkgPath, p.Errors); err != nil {
-			return err
-		} else if dir != "" {
-			return copyDirGoFiles(dir, destDir)
-		}
 		return p.Errors[0]
 	}
 
