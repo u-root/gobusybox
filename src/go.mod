@@ -8,7 +8,7 @@ require (
 	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701
 	golang.org/x/exp v0.0.0-20260312153236-7ab1446f8b90
 	golang.org/x/tools v0.43.0
-	mvdan.cc/sh/v3 v3.13.0
+	mvdan.cc/sh/v3 v3.11.0
 )
 
 require (
