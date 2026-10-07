@@ -15,7 +15,7 @@ determine which command is being called.
 
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
-| Go version | Tested are 1.20-1.22                                  |
+| Go version | 1.25 and later (see src/go.mod)                       |
 | Packaging  | Go workspaces, Go modules, Go vendoring               |
 | `GOOS`     | any (linux is tested)                                 |
 | `GOARCH`   | any (amd64, arm, arm64, riscv64 are tested)           |
@@ -26,7 +26,7 @@ An example:
 ```bash
 go install github.com/u-root/gobusybox/src/cmd/makebb@latest
 
-git clone github.com/u-root/u-root
+git clone https://github.com/u-root/u-root
 cd u-root
 makebb ./cmds/core/dmesg ./cmds/core/strace
 ```
@@ -115,7 +115,7 @@ go work use ./cpu
 
 makebb \
     ./u-root/cmds/core/init \
-    ./u-root/cmds/core/elvish \
+    ./u-root/cmds/core/gosh \
     ./cpu/cmds/cpud
 
 # Also works for offline builds with `go work vendor` (Go 1.22 feature):
@@ -123,7 +123,7 @@ go work vendor
 
 makebb \
     ./u-root/cmds/core/init \
-    ./u-root/cmds/core/elvish \
+    ./u-root/cmds/core/gosh \
     ./cpu/cmds/cpud
 ```
 
@@ -135,12 +135,12 @@ and checked for existence.
 ```shell
 GBB_PATH=$(pwd)/u-root:$(pwd)/cpu makebb \
     cmds/core/init \
-    cmds/core/elvish \
+    cmds/core/gosh \
     cmds/cpud
 
 # matches:
 #   $(pwd)/u-root/cmds/core/init
-#   $(pwd)/u-root/cmds/core/elvish
+#   $(pwd)/u-root/cmds/core/gosh
 #   $(pwd)/cpu/cmds/cpud
 ```
 
@@ -200,7 +200,7 @@ package something
 import (
         _ "github.com/u-root/u-root/cmds/core/ip"
         _ "github.com/u-root/u-root/cmds/core/init"
-        _ "github.com/hugelgupf/p9/cmd/p9ufs"
+        _ "github.com/u-root/cpu/cmds/cpud"
 )
 ```
 
@@ -211,7 +211,7 @@ go install github.com/u-root/gobusybox/src/cmd/gencmddeps@latest
 
 gencmddeps -o deps.go -t tools -p something \
     github.com/u-root/u-root/cmds/core/{ip,init} \
-    github.com/hugelgupf/p9/cmd/p9ufs
+    github.com/u-root/cpu/cmds/cpud
 ```
 
 > [!IMPORTANT]
@@ -229,7 +229,7 @@ go mod tidy
 makebb \
   github.com/u-root/u-root/cmds/core/ip \
   github.com/u-root/u-root/cmds/core/init \
-  github.com/hugelgupf/p9/cmd/p9ufs
+  github.com/u-root/cpu/cmds/cpud
 
 # Also works with vendored, offline builds:
 go mod vendor
@@ -237,7 +237,7 @@ go mod vendor
 makebb \
   github.com/u-root/u-root/cmds/core/ip \
   github.com/u-root/u-root/cmds/core/init \
-  github.com/hugelgupf/p9/cmd/p9ufs
+  github.com/u-root/cpu/cmds/cpud
 ```
 
 ## APIs
@@ -338,7 +338,7 @@ import (
   "flag"
   "log"
 
-  "../bb/pkg/bbmain" // generated import path
+  bbmain "bb.u-root.com/bb/pkg/bbmain" // generated import path
 )
 
 // Type has to be inferred through type checking.
@@ -383,7 +383,7 @@ import (
   // Side-effect import so init in sl calls bbmain.Register
   _ "github.com/org/repo/cmds/sl"
 
-  "../bb/pkg/bbmain"
+  "bb.u-root.com/bb/pkg/bbmain"
 )
 
 func main() {
@@ -396,48 +396,62 @@ func main() {
 All files are written into a temporary directory. All dependency Go packages are
 also written there.
 
-The directory structure we generate resembles a $GOPATH-based source tree, even
-if we are combining module-based Go commands. Regardless of whether the original
-commands are based on Go modules, Go workspaces, or GOPATH, we generate the same
-structure and compiled with `GOPATH=$tmpdir GO111MODULE=off`.
+The generated tree is a single, self-contained Go module named
+`bb.u-root.com/bb`. The generated `main.go` sits at the module root, and every
+rewritten command and every non-standard-library dependency is written into
+`vendor/` at its original import path, so that the rewritten sources compile
+without any of their import statements being touched.
 
-This means that in all cases, traditionally offline compilations remain offline
-(e.g. GOPATH, or vendored modules / workspaces).
+Regardless of whether the original commands come from Go modules, Go
+workspaces, or GOPATH, we generate the same structure and compile it with
+`GOWORK=off go build -mod=vendor`. Because everything is vendored, `-mod=vendor`
+consults neither the network nor the module cache, so in all cases traditionally
+offline compilations remain offline.
+
+`go.mod` and `vendor/modules.txt` are generated together from the same package
+list; the go tool rejects a vendor directory whose `modules.txt` disagrees with
+`go.mod`. Packages that have no module of their own -- anything found in GOPATH
+mode -- are each recorded as a synthetic single-package module, at a synthetic
+version that `-mod=vendor` never resolves.
 
 ```
 /tmp/bb-$NUM/
-└── src
-    ├── bb.u-root.com
-    │   └── bb
-    │       ├── main.go               << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
-    │       └── pkg
-    │           └── bbmain
-    │               └── register.go   << ./src/pkg/bb/bbmain/register.go
-    └── github.com
-        └── u-root
-            ├── uio
-            │   ├── uio               << dependency used by both
-            │   └── ulog              << dependency used by both
-            ├── u-bmc
-            │   ├── cmd
-            │   │   ├── fan           << generated command package
-            │   │   ├── login         << generated command package
-            │   │   └── socreset      << generated command package
-            │   └── pkg
-            │       ├── acme          << dependency copied from u-bmc
-            │       ├── aspeed        << dependency copied from u-bmc
-            │       ├── gpiowatcher   << dependency copied from u-bmc
-            │       └── mtd           << dependency copied from u-bmc
-            └── u-root
-                ├── cmds
-                │   └── core
-                │       ├── cat       << generated command package
-                │       ├── ip        << generated command package
-                │       └── ls        << generated command package
-                └── pkg
-                    ├── curl          << dependency copied from u-root
-                    ├── dhclient      << dependency copied from u-root
-                    ├── ip            << dependency copied from u-root
-                    ├── ls            << dependency copied from u-root
-                    └── uio           << dependency copied from u-root
+├── go.mod                           << module bb.u-root.com/bb
+├── main.go                          << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
+├── pkg
+│   └── bbmain
+│       └── register.go              << ./src/pkg/bb/bbmain/register.go
+└── vendor
+    ├── modules.txt                  << generated manifest
+    ├── github.com
+    │   └── u-root
+    │       ├── uio
+    │       │   ├── uio              << dependency used by both
+    │       │   └── ulog             << dependency used by both
+    │       ├── u-bmc
+    │       │   ├── cmd
+    │       │   │   ├── fan          << generated command package
+    │       │   │   ├── login        << generated command package
+    │       │   │   └── socreset     << generated command package
+    │       │   └── pkg
+    │       │       ├── acme         << dependency copied from u-bmc
+    │       │       ├── aspeed       << dependency copied from u-bmc
+    │       │       ├── gpiowatcher  << dependency copied from u-bmc
+    │       │       └── mtd          << dependency copied from u-bmc
+    │       └── u-root
+    │           ├── cmds
+    │           │   └── core
+    │           │       ├── cat      << generated command package
+    │           │       ├── ip       << generated command package
+    │           │       └── ls       << generated command package
+    │           └── pkg
+    │               ├── curl         << dependency copied from u-root
+    │               ├── dhclient     << dependency copied from u-root
+    │               ├── ip           << dependency copied from u-root
+    │               ├── ls           << dependency copied from u-root
+    │               └── uio          << dependency copied from u-root
+    └── golang.org
+        └── x
+            └── sys
+                └── unix             << dependency copied from golang.org/x/sys
 ```
