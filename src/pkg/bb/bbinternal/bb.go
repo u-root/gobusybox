@@ -2,8 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-// Package bbinternal is the internal API for both bazel and standard Go
-// busybox builds.
+// Package bbinternal is the internal API for busybox builds.
 //
 // It contains exported functions that are not for user consumption and not
 // stable.
@@ -429,9 +428,7 @@ func WritePkg(p *packages.Package, destDir string) error {
 		}
 	}
 
-	// This is true for Go command definitely.
-	//
-	// Don't know about blaze and bazel. TBD.
+	// The package directory, which all GoFiles share.
 	pkgDir := filepath.Dir(p.GoFiles[0])
 
 	for _, fp := range p.EmbedFiles {
@@ -441,9 +438,6 @@ func WritePkg(p *packages.Package, destDir string) error {
 		// Windows systems. Patterns may not contain ‘.’ or ‘..’ or
 		// empty path elements, nor may they begin or end with a
 		// slash."
-		//
-		// This is not necessarily true for bazel embedsrcs files, but
-		// let's not worry about that for now.
 		//
 		// This means that the file must be a descendant of the package
 		// directory and we can assume that all EmbedFiles share a base
@@ -477,9 +471,7 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 // Rewrite rewrites p into destDir as a bb package, rewriting its init and main
 // functions.
 //
-// bbImportPath is the importpath to use for bbmain. bbImportPath is usually
-// bb.u-root.com/bb/pkg/bbmain for the Go module/vendor-based compilations, but
-// github.com/u-root/gobusybox/src/pkg/bb/bbmain for bazel-based compilations.
+// bbImportPath is the import path to use for bbmain.
 func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	// This init holds all variable initializations.
 	//

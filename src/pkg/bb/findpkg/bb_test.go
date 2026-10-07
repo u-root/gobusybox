@@ -100,14 +100,14 @@ func TestResolve(t *testing.T) {
 		// Two packages, globbed file system path.
 		{
 			name: "fspath-glob",
-			in:   []string{filepath.Join(gbbmod, "cmd/make*")},
-			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
+			in:   []string{filepath.Join(gbbmod, "cmd/g*")},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/gencmddeps", "github.com/u-root/gobusybox/src/cmd/goanywhere"},
 		},
 		// Two packages, globbed Go package path.
 		{
 			name: "pkgpath-glob",
-			in:   []string{"github.com/u-root/gobusybox/src/cmd/make*"},
-			want: []string{"github.com/u-root/gobusybox/src/cmd/makebb", "github.com/u-root/gobusybox/src/cmd/makebbmain"},
+			in:   []string{"github.com/u-root/gobusybox/src/cmd/g*"},
+			want: []string{"github.com/u-root/gobusybox/src/cmd/gencmddeps", "github.com/u-root/gobusybox/src/cmd/goanywhere"},
 		},
 		// Globbed file system path of non-existent packages.
 		{
