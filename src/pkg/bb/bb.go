@@ -25,7 +25,6 @@ package bb
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -79,7 +78,9 @@ type Opts struct {
 	// given, a temporary directory will be generated. The generated
 	// directory will be deleted if compilation succeeds.
 	//
-	// In GOPATH mode, GOPATH=GenSrcDir for compilation.
+	// GenSrcDir becomes the root of a self-contained, fully vendored Go
+	// module. It can be built on its own with
+	// `cd $GenSrcDir && GOWORK=off go build -mod=vendor`.
 	GenSrcDir string
 
 	// CommandPaths is a list of file system directories containing Go
@@ -115,7 +116,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	var tmpDir string
 	if opts.GenSrcDir != "" {
 		var relTmpDir string
-		dirents, err := ioutil.ReadDir(opts.GenSrcDir)
+		dirents, err := os.ReadDir(opts.GenSrcDir)
 		if os.IsNotExist(err) {
 			if err := os.MkdirAll(opts.GenSrcDir, 0700); err != nil {
 				return fmt.Errorf("could not create directory for busybox generated source: %w", err)
@@ -138,7 +139,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 			return fmt.Errorf("GenerateOnly switch requires that the GenSrcDir directory be supplied")
 		}
 		var err error
-		tmpDir, err = ioutil.TempDir("", "bb-")
+		tmpDir, err = os.MkdirTemp("", "bb-")
 		if err != nil {
 			return err
 		}
@@ -151,11 +152,19 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		}()
 	}
 
-	bbDir := filepath.Join(tmpDir, "src/bb.u-root.com/bb")
-	if err := os.MkdirAll(bbDir, 0700); err != nil {
+	// The generated tree is a single, fully vendored Go module.
+	//
+	// The main command sits at the module root; every rewritten command
+	// and every non-standard-library dependency is written into vendor/ at
+	// its original import path, so that the rewritten sources continue to
+	// compile without touching any of their import statements.
+	//
+	// Vendoring is what keeps a traditionally offline compilation offline:
+	// -mod=vendor consults neither the network nor the module cache.
+	vendorDir := filepath.Join(tmpDir, "vendor")
+	if err := os.MkdirAll(vendorDir, 0700); err != nil {
 		return err
 	}
-	pkgDir := filepath.Join(tmpDir, "src")
 
 	var lookupEnv findpkg.Env
 	if opts.LookupEnv != nil {
@@ -191,25 +200,38 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return fmt.Errorf("gobusybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(maps.Keys(modules), ", "))
 	}
 
+	// Every package written into vendor/, keyed by the import path it is
+	// written at. go.mod and vendor/modules.txt are derived from this same
+	// map, so the manifest cannot drift from what is on disk.
+	vendored := make(map[string]*packages.Package)
+
 	// List of packages to import in the real main file.
 	var bbImports []string
 	// Rewrite commands to packages.
 	for _, cmd := range cmds {
-		destination := filepath.Join(pkgDir, cmd.Pkg.PkgPath)
-
-		if err := cmd.Rewrite(destination, "bb.u-root.com/bb/pkg/bbmain"); err != nil {
+		ipath := vendorPkgPath(cmd.Pkg.PkgPath)
+		if err := cmd.Rewrite(filepath.Join(vendorDir, ipath), bbMainImportPath); err != nil {
 			return fmt.Errorf("rewriting command %q failed: %v", cmd.Pkg.PkgPath, err)
 		}
-		bbImports = append(bbImports, cmd.Pkg.PkgPath)
+		vendored[ipath] = cmd.Pkg
+		bbImports = append(bbImports, ipath)
 	}
 
-	// Collect and write dependencies into pkgDir.
-	if err := copyAllDeps(l, opts.Env, bbDir, tmpDir, pkgDir, cmds); err != nil {
+	// Collect and write dependencies into vendorDir.
+	if err := copyAllDeps(vendorDir, cmds, vendored); err != nil {
 		return fmt.Errorf("collecting and putting dependencies in place failed: %v", err)
 	}
 
-	if err := writeBBMain(bbDir, tmpDir, bbImports); err != nil {
+	if err := writeBBMain(tmpDir, bbImports); err != nil {
 		return fmt.Errorf("failed to write main.go: %v", err)
+	}
+
+	version, err := opts.Env.Version()
+	if err != nil {
+		return fmt.Errorf("could not determine Go version: %w", err)
+	}
+	if err := writeModule(tmpDir, vendored, goLangVersion(version)); err != nil {
+		return err
 	}
 
 	if opts.GenerateOnly {
@@ -217,21 +239,27 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	}
 
 	// Get ready to compile bb.
-	buildEnv := opts.Env.Copy(golang.WithGO111MODULE("off"), golang.WithGOPATH(tmpDir), golang.WithMod(""))
-	if err := buildEnv.BuildDir(bbDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
+	//
+	// GOWORK=off because the generated module must be built on its own
+	// terms even if it happens to be written underneath a directory
+	// containing a go.work.
+	buildEnv := opts.Env.Copy(
+		golang.WithGO111MODULE("on"),
+		golang.WithGOWORK("off"),
+		golang.WithMod(golang.ModVendor),
+	)
+	if err := buildEnv.BuildDir(tmpDir, opts.BinaryPath, opts.GoBuildOpts); err != nil {
 		return &ErrBuild{
-			CmdDir: bbDir,
-			GOPATH: tmpDir,
+			CmdDir: tmpDir,
 			Err:    err,
 		}
 	}
 	return nil
 }
 
-// ErrBuild is returned for a go build failure when modules were disabled.
+// ErrBuild is returned when compiling the generated busybox module fails.
 type ErrBuild struct {
 	CmdDir string
-	GOPATH string
 	Err    error
 }
 
@@ -242,27 +270,22 @@ func (e *ErrBuild) Unwrap() error {
 
 // Error implements error.Error.
 func (e *ErrBuild) Error() string {
-	return fmt.Sprintf("`(cd %s && GOPATH=%s GO111MODULE=off go build)` failed: %v", e.CmdDir, e.GOPATH, e.Err)
+	return fmt.Sprintf("`(cd %s && GO111MODULE=on GOWORK=off go build -mod=vendor)` failed: %v", e.CmdDir, e.Err)
 }
 
-// writeBBMain writes $TMPDIR/src/bb.u-root.com/bb/pkg/bbmain/register.go and
-// $TMPDIR/src/bb.u-root.com/bb/main.go.
+// writeBBMain writes $GENDIR/pkg/bbmain/register.go and $GENDIR/main.go.
 //
 // They are taken from ./bbmain/register.go and ./bbmain/cmd/main.go, but they
-// do not retain their original import paths because the main command must be
-// in a module that doesn't conflict with any bb commands. If one were to
-// compile github.com/u-root/gobusybox/src/cmd/* into a busybox, we'd have
-// problems -- the src/go.mod would conflict with our generated go.mod, and
-// it'd be complicated to merge them. So they are transplanted into the
-// bb.u-root.com/bb module.
-func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
+// do not retain their original import paths, because the main command must be
+// in a module that doesn't conflict with any bb commands. See bbModulePath.
+func writeBBMain(bbDir string, bbImports []string) error {
 	if err := os.MkdirAll(filepath.Join(bbDir, "pkg/bbmain"), 0755); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(filepath.Join(bbDir, "pkg/bbmain/register.go"), bbRegisterSource, 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(bbDir, "pkg/bbmain/register.go"), bbRegisterSource, 0644); err != nil {
 		return err
 	}
-	if err := ioutil.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0755); err != nil {
+	if err := os.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0644); err != nil {
 		return err
 	}
 
@@ -275,7 +298,7 @@ func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
 	}
 
 	// Fix the import path for bbmain, since we wrote bbmain/register.go into bbDir above.
-	if !astutil.RewriteImport(bbFset, bbFiles[0], "github.com/u-root/gobusybox/src/pkg/bb/bbmain", "bb.u-root.com/bb/pkg/bbmain") {
+	if !astutil.RewriteImport(bbFset, bbFiles[0], "github.com/u-root/gobusybox/src/pkg/bb/bbmain", bbMainImportPath) {
 		return fmt.Errorf("could not rewrite import")
 	}
 
@@ -286,22 +309,26 @@ func writeBBMain(bbDir, tmpDir string, bbImports []string) error {
 	return nil
 }
 
-func copyAllDeps(l ulog.Logger, env *golang.Environ, bbDir, tmpDir, pkgDir string, mainPkgs []*bbinternal.Package) error {
+// copyAllDeps writes every non-standard-library dependency of mainPkgs into
+// vendorDir, recording each one in vendored.
+//
+// Packages already present in vendored -- the rewritten commands -- are left
+// alone, so that a command is never overwritten by its own unrewritten source.
+func copyAllDeps(vendorDir string, mainPkgs []*bbinternal.Package, vendored map[string]*packages.Package) error {
 	var deps []*packages.Package
 	for _, p := range mainPkgs {
 		deps = append(deps, collectDeps(p.Pkg)...)
 	}
 
-	// Copy local dependency packages into module directories at
-	// tmpDir/src.
-	seenIDs := make(map[string]struct{})
 	for _, p := range deps {
-		if _, ok := seenIDs[p.ID]; !ok {
-			if err := bbinternal.WritePkg(p, filepath.Join(pkgDir, p.PkgPath)); err != nil {
-				return fmt.Errorf("writing package %s failed: %v", p, err)
-			}
-			seenIDs[p.ID] = struct{}{}
+		ipath := vendorPkgPath(p.PkgPath)
+		if _, ok := vendored[ipath]; ok {
+			continue
 		}
+		if err := bbinternal.WritePkg(p, filepath.Join(vendorDir, ipath)); err != nil {
+			return fmt.Errorf("writing package %s failed: %v", p, err)
+		}
+		vendored[ipath] = p
 	}
 	return nil
 }
@@ -319,7 +346,7 @@ func deps(p *packages.Package, filter func(p *packages.Package) bool) []*package
 }
 
 func collectDeps(p *packages.Package) []*packages.Package {
-	// If modules are not enabled, we need a copy of *ALL*
+	// The generated module vendors everything, so we need a copy of *ALL*
 	// non-standard-library dependencies in the temporary directory.
 	return deps(p, func(pkg *packages.Package) bool {
 		// First component of package path contains a "."?
