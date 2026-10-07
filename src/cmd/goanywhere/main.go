@@ -30,12 +30,12 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/hashicorp/go-version"
 	"github.com/u-root/gobusybox/src/pkg/bb/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 	"github.com/u-root/uio/ulog"
 	"golang.org/x/exp/maps"
 	"golang.org/x/exp/slices"
+	"golang.org/x/mod/modfile"
 )
 
 var (
@@ -73,6 +73,23 @@ func run(dir string, args []string, paths []string) {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+// moduleGoVersion returns the go directive of the go.mod in dir, or "" if it
+// declares none.
+func moduleGoVersion(dir string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", err
+	}
+	f, err := modfile.ParseLax(filepath.Join(dir, "go.mod"), b, nil)
+	if err != nil {
+		return "", err
+	}
+	if f.Go == nil {
+		return "", nil
+	}
+	return f.Go.Version, nil
 }
 
 func main() {
@@ -120,12 +137,27 @@ func main() {
 		if err != nil {
 			v = runtime.Version()
 		}
-		v, _ = strings.CutPrefix(v, "go")
-		vers, err := version.NewVersion(v)
-		if err != nil {
-			log.Fatalf("Could not determine version from %v (set a version with -v flag): %v", v, err)
+		*versionFlag = golang.MajorMinorGoVersion(v, "")
+		if *versionFlag == "" {
+			log.Fatalf("Could not determine version from %v (set a version with -v flag)", v)
 		}
-		*versionFlag = fmt.Sprintf("%d.%d", vers.Segments()[0], vers.Segments()[1])
+	}
+
+	// A go.work must declare a go version at least as high as every module
+	// it uses, or the go tool refuses to load the workspace with
+	// "module X requires go >= Y, but go.work lists go Z".
+	//
+	// This runs even when -v was given. An explicit version is a baseline,
+	// not a ceiling: honouring "-v 1.25" against a member declaring
+	// "go 1.26.6" would emit a workspace the go tool rejects outright.
+	for dir := range mods {
+		mv, err := moduleGoVersion(dir)
+		if err != nil {
+			log.Fatalf("Could not read go.mod in %s: %v", dir, err)
+		}
+		if golang.CompareGoVersions(mv, *versionFlag) > 0 {
+			*versionFlag = mv
+		}
 	}
 
 	tpl := `go {{.Version}}
