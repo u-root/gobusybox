@@ -101,6 +101,40 @@ func TestVendorManifest(t *testing.T) {
 				{Path: "z.com", Version: "v1.0.0", GoVersion: "1.21", Packages: []string{"z.com/p"}},
 			},
 		},
+		// The cases below sit at or under the generated module's path
+		// without being it. A vendored package is reached through
+		// vendor/modules.txt, so these resolve to vendor/ and must keep
+		// working; rejecting them would break real builds.
+		{
+			name: "module below the generated module path",
+			in: map[string]*packages.Package{
+				bbModulePath + "/extra/cmd/bar": pkg(bbModulePath+"/extra/cmd/bar", &packages.Module{Path: bbModulePath + "/extra", Version: "v1.0.0", GoVersion: "1.21"}),
+			},
+			want: []vendoredModule{{
+				Path: bbModulePath + "/extra", Version: "v1.0.0", GoVersion: "1.21",
+				Packages: []string{bbModulePath + "/extra/cmd/bar"},
+			}},
+		},
+		{
+			name: "package under the generated module path, from a parent module",
+			in: map[string]*packages.Package{
+				bbModulePath + "/cmd/foo": pkg(bbModulePath+"/cmd/foo", &packages.Module{Path: "bb.u-root.com", Version: "v1.0.0", GoVersion: "1.21"}),
+			},
+			want: []vendoredModule{{
+				Path: "bb.u-root.com", Version: "v1.0.0", GoVersion: "1.21",
+				Packages: []string{bbModulePath + "/cmd/foo"},
+			}},
+		},
+		{
+			name: "module at the generated bbmain import path",
+			in: map[string]*packages.Package{
+				bbMainImportPath + "/cmd/qux": pkg(bbMainImportPath+"/cmd/qux", &packages.Module{Path: bbMainImportPath, Version: "v1.0.0", GoVersion: "1.21"}),
+			},
+			want: []vendoredModule{{
+				Path: bbMainImportPath, Version: "v1.0.0", GoVersion: "1.21",
+				Packages: []string{bbMainImportPath + "/cmd/qux"},
+			}},
+		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := vendorManifest(tt.in)
@@ -142,6 +176,18 @@ func TestVendorManifestErrors(t *testing.T) {
 			in: map[string]*packages.Package{
 				"other.com/p": pkg("other.com/p", &packages.Module{Path: "example.com/m", Version: "v1.0.0", GoVersion: "1.21"}),
 			},
+		},
+		{
+			// go.mod would say `module bb.u-root.com/bb` and
+			// `require bb.u-root.com/bb v0.0.0`. The go tool
+			// rejects that, but only with "vendored module
+			// bb.u-root.com/bb@v0.0.0 should be required
+			// explicitly in go.mod", which names no cause.
+			name: "input module is exactly the generated module path",
+			in: map[string]*packages.Package{
+				bbModulePath + "/cmd/foo": pkg(bbModulePath+"/cmd/foo", &packages.Module{Path: bbModulePath, GoVersion: "1.25"}),
+			},
+			want: errModulePathCollision,
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
