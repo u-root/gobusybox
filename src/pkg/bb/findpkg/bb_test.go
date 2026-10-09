@@ -20,7 +20,7 @@ import (
 type testCase struct {
 	// name of the test case
 	name string
-	// envs to try it in (if unset, default will be GO111MODULE=on and off)
+	// envs to try it in (if unset, defaults to GO111MODULE=on)
 	envs []*golang.Environ
 	// wd sets the findpkg.Env.WorkingDirectory
 	// WorkingDirectory is the directory used for module-enabled
@@ -48,7 +48,6 @@ func TestResolve(t *testing.T) {
 	}
 	gbbroot := filepath.Dir(gbbmod)
 
-	moduleOffEnv := golang.Default(golang.WithGO111MODULE("off"))
 	moduleOnEnv := golang.Default(golang.WithGO111MODULE("on"))
 	// TODO: re-enable when https://github.com/golang/go/issues/62114 is resolved.
 	// noGoToolEnv := golang.Default(golang.WithGOROOT(t.TempDir()))
@@ -285,19 +284,6 @@ func TestResolve(t *testing.T) {
 				"github.com/u-root/u-root/cmds/core/ip",
 			},
 		},
-		// Old-style GOPATH resolution.
-		{
-			name: "fspath-nomodule",
-			envs: []*golang.Environ{moduleOffEnv},
-			in:   []string{filepath.Join(gbbroot, "vendortest/cmd/dmesg")},
-			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-		},
-		{
-			name: "pkgpath-nomodule",
-			envs: []*golang.Environ{moduleOffEnv},
-			in:   []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-			want: []string{"github.com/u-root/gobusybox/vendortest/cmd/dmesg"},
-		},
 		// File system path. Not a directory.
 		{
 			name:    "fspath-not-a-directory",
@@ -330,7 +316,7 @@ func TestResolve(t *testing.T) {
 	}
 
 	for _, tc := range sharedTestCases {
-		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
+		envs := []*golang.Environ{moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
 		}
@@ -354,8 +340,6 @@ func TestResolve(t *testing.T) {
 		}
 	}
 
-	//noGopathModuleOffEnv := golang.Default(golang.WithGO111MODULE("off"), golang.WithGOPATH(t.TempDir()))
-
 	newPkgTests := append(sharedTestCases, testCase{
 		name:    "fspath-parse-broken",
 		in:      []string{"./test/parsebroken"},
@@ -366,7 +350,7 @@ func TestResolve(t *testing.T) {
 		wantErr: true,
 	})
 	for _, tc := range newPkgTests {
-		envs := []*golang.Environ{moduleOffEnv, moduleOnEnv}
+		envs := []*golang.Environ{moduleOnEnv}
 		if tc.envs != nil {
 			envs = tc.envs
 		}

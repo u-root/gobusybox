@@ -54,8 +54,6 @@ jobs:
         goversion: ['1.25.x', '1.26.x']
     steps:
       - uses: actions/checkout@v4
-        with:
-          path: go/src/github.com/u-root/gobusybox
 
       - name: Setup Go
         uses: actions/setup-go@v4
@@ -64,51 +62,13 @@ jobs:
 
       - name: Test
         run: |
-          cd go/src/github.com/u-root/gobusybox/src
-
-          # Make sure GO111MODULE=off cases work.
-          go mod vendor
-
-          # Unit tests cover both GO111MODULE=on and off cases.
-          GOPATH=$GITHUB_WORKSPACE/go go test -covermode=atomic -coverprofile cover.out ./...
+          cd src
+          go test -covermode=atomic -coverprofile cover.out ./...
 
       - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
         env:
           CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
         with:
-          working-directory: go/src/github.com/u-root/gobusybox
-          flags: ${{ matrix.goversion }}
-          fail_ci_if_error: true
-          verbose: true
-
-  test-gopath:
-    name: gobuilds-gopath
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goversion: ['1.25.x', '1.26.x']
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: go/src/github.com/u-root/gobusybox
-
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ matrix.goversion }}
-
-      - name: Test
-        run: |
-          cd go/src/github.com/u-root/gobusybox
-          mkdir cover
-          GOPATH=$GITHUB_WORKSPACE/go GOCOVERDIR=$(pwd)/cover ./gobuilds-gopath.sh
-          go tool covdata textfmt -i=cover -o cover.out
-
-      - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
-        env:
-          CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
-        with:
-          working-directory: go/src/github.com/u-root/gobusybox
           flags: ${{ matrix.goversion }}
           fail_ci_if_error: true
           verbose: true
@@ -159,34 +119,6 @@ jobs:
         run: |
           mkdir cover
           GOCOVERDIR=$(pwd)/cover ./test-external-workspaces.sh
-          go tool covdata textfmt -i=cover -o cover.out
-
-      - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
-        env:
-          CODECOV_TOKEN: 'bf25d8b2-b4f9-43f4-b578-64eefbe31e61'
-        with:
-          flags: ${{ matrix.goversion }}
-          fail_ci_if_error: true
-          verbose: true
-
-  test-external-gopath:
-    name: test-external-gopath
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goversion: ['1.25.x', '1.26.x']
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Go
-        uses: actions/setup-go@v4
-        with:
-          go-version: ${{ matrix.goversion }}
-
-      - name: Test
-        run: |
-          mkdir cover
-          GOCOVERDIR=$(pwd)/cover ./test-external-gopath.sh
           go tool covdata textfmt -i=cover -o cover.out
 
       - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a

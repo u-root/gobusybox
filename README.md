@@ -402,17 +402,24 @@ rewritten command and every non-standard-library dependency is written into
 `vendor/` at its original import path, so that the rewritten sources compile
 without any of their import statements being touched.
 
-Regardless of whether the original commands come from Go modules, Go
-workspaces, or GOPATH, we generate the same structure and compile it with
-`GOWORK=off go build -mod=vendor`. Because everything is vendored, `-mod=vendor`
-consults neither the network nor the module cache, so in all cases traditionally
-offline compilations remain offline.
+Whether the original commands come from a single Go module or several joined by
+a Go workspace, we generate the same structure and compile it with `GOWORK=off
+go build -mod=vendor`. Because everything is vendored, `-mod=vendor` consults
+neither the network nor the module cache, so in all cases traditionally offline
+compilations remain offline.
+
+Every command must live in a Go module. GOPATH mode (`GO111MODULE=off`) is not
+supported: it is the only mode in which one import path can exist at two
+versions at once, each reached through a different nested `vendor/` directory,
+and a module vendor directory is flat and can hold only one of them. See
+[docs/adr/0002-gopath-mode-is-not-supported.md](docs/adr/0002-gopath-mode-is-not-supported.md).
+If your commands span several modules, use `goanywhere` to put them in a
+workspace.
 
 `go.mod` and `vendor/modules.txt` are generated together from the same package
 list; the go tool rejects a vendor directory whose `modules.txt` disagrees with
-`go.mod`. Packages that have no module of their own -- anything found in GOPATH
-mode -- are each recorded as a synthetic single-package module, at a synthetic
-version that `-mod=vendor` never resolves.
+`go.mod`. A main module has no version of its own, so its packages are recorded
+at a synthetic version that `-mod=vendor` never resolves.
 
 ```
 /tmp/bb-$NUM/
