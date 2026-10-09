@@ -115,7 +115,7 @@ func main() {
 	mods, noModulePaths := findpkg.Modules(paths)
 
 	if env.GO111MODULE == "off" {
-		run("", args, paths)
+		log.Fatalf("GO111MODULE=off is not supported: goanywhere exists to generate a go.work, which GOPATH mode cannot use. Unset GO111MODULE, or set it to on.")
 	}
 
 	if len(noModulePaths) > 0 {
