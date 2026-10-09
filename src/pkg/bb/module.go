@@ -5,6 +5,7 @@
 package bb
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -24,6 +25,14 @@ import (
 // github.com/u-root/gobusybox/src/cmd/* into a busybox, a module named after
 // this repository would conflict with src/go.mod, and merging the two would be
 // complicated. So the main command and bbmain are transplanted here instead.
+//
+// Only an exact match is a problem. A vendored package is reached through
+// vendor/modules.txt, which maps module paths to vendored directories, so a
+// module merely sitting underneath this path -- bb.u-root.com/bb/extra, say,
+// or a package bb.u-root.com/bb/cmd/foo belonging to module bb.u-root.com --
+// resolves to vendor/ and builds correctly. A module whose path is exactly
+// this one is different: it would be required by a go.mod that already
+// declares it as the module being built. See checkModulePathCollision.
 const bbModulePath = "bb.u-root.com/bb"
 
 // bbMainImportPath is the import path of the generated bbmain package. Every
@@ -49,6 +58,18 @@ type vendoredModule struct {
 	GoVersion string
 	Packages  []string
 }
+
+// errModulePathCollision is returned when an input module's path is exactly
+// bbModulePath, so that the generated go.mod would have to require the very
+// module it declares. The go tool rejects that with a message about the
+// vendored module needing to be required explicitly, which says nothing about
+// the actual cause.
+//
+// Unexported: reaching this needs a module named after the sentinel path the
+// generated tree uses, which in practice means re-running makebb inside a
+// previously generated tree. No caller has reason to branch on it. It exists
+// to make the message legible, not to be matched.
+var errModulePathCollision = errors.New("input module collides with the generated busybox module path")
 
 // hasPathPrefix reports whether modPath is a path-element prefix of pkgPath.
 func hasPathPrefix(modPath, pkgPath string) bool {
@@ -96,6 +117,9 @@ func vendorManifest(pkgs map[string]*packages.Package) ([]vendoredModule, error)
 		mod := p.Module
 		if mod == nil {
 			return nil, fmt.Errorf("%w: %s", ErrNoModule, ip)
+		}
+		if mod.Path == bbModulePath {
+			return nil, fmt.Errorf("%w: package %s is in module %s, which is the path of the generated busybox module itself -- the generated go.mod would have to require the module it declares; rename the module", errModulePathCollision, ip, mod.Path)
 		}
 		if !hasPathPrefix(mod.Path, ip) {
 			return nil, fmt.Errorf("package %s is attributed to module %s, which is not a prefix of its import path", ip, mod.Path)
