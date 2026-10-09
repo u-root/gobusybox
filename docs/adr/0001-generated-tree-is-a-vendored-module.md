@@ -15,15 +15,13 @@ cache, but does not depend on a mode the Go toolchain has been retiring.
   list. The go tool rejects a vendor directory whose manifest disagrees with its
   `go.mod`, so the two can never be derived independently.
 
-- Packages with no module of their own — anything found in GOPATH mode — are
-  each recorded as a synthetic single-package module at a synthetic version.
-  Nothing ever resolves those versions, so they only have to be syntactically
-  valid and internally consistent.
-
-- Packages reached through a GOPATH-style nested `vendor/` directory are
-  reported by `go/packages` under their vendored path but imported under their
-  real one. A module vendor directory is flat, so that prefix is stripped when
-  writing them.
+- Packages with no module of their own are not representable: a vendored
+  package is recorded under its module's path and version, so every package
+  needs a module. This is what made GOPATH mode untenable; see
+  [0002](0002-gopath-mode-is-not-supported.md). A main module has no version of
+  its own, so its packages get a synthetic one. Nothing ever resolves these
+  versions, so they only have to be syntactically valid and internally
+  consistent.
 
 - Unlike `GO111MODULE=off`, a module build enforces `go` directives. The
   generated module therefore declares a version at least as high as every module

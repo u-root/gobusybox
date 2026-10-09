@@ -31,8 +31,7 @@ const bbModulePath = "bb.u-root.com/bb"
 const bbMainImportPath = bbModulePath + "/pkg/bbmain"
 
 // syntheticVersion is the module version recorded for packages whose real
-// version is unknown or inapplicable: main modules, which have no version, and
-// packages found in GOPATH mode, which have no module at all.
+// version is inapplicable: those in a main module, which has no version.
 //
 // A vendored build never resolves these versions against a proxy or the module
 // cache, so any syntactically valid version will do. It only has to agree
@@ -49,21 +48,6 @@ type vendoredModule struct {
 	Version   string
 	GoVersion string
 	Packages  []string
-}
-
-// vendorPkgPath returns the import path at which a package will be reachable
-// inside the generated vendor directory.
-//
-// go/packages reports a package found through a GOPATH-style nested vendor
-// directory under its fully vendored path, e.g.
-// github.com/u-root/u-root/vendor/golang.org/x/sys/unix. The import statements
-// referring to it say golang.org/x/sys/unix, and a module vendor directory is
-// flat, so the vendored prefix has to be stripped.
-func vendorPkgPath(pkgPath string) string {
-	if i := strings.LastIndex(pkgPath, "/vendor/"); i >= 0 {
-		return pkgPath[i+len("/vendor/"):]
-	}
-	return pkgPath
 }
 
 // hasPathPrefix reports whether modPath is a path-element prefix of pkgPath.
@@ -93,9 +77,10 @@ func syntheticVersionFor(modPath string) string {
 // vendorManifest groups packages by the module they will be attributed to in
 // vendor/modules.txt.
 //
-// goVersion is the language version used for packages that have no module to
-// take one from.
-func vendorManifest(pkgs map[string]*packages.Package, goVersion string) []vendoredModule {
+// Every package must belong to a module whose path is a prefix of its import
+// path. Callers guarantee this by rejecting GOPATH-mode builds up front; see
+// checkModules.
+func vendorManifest(pkgs map[string]*packages.Package) ([]vendoredModule, error) {
 	type modKey struct{ path, version string }
 	mods := make(map[modKey]*vendoredModule)
 
@@ -108,21 +93,20 @@ func vendorManifest(pkgs map[string]*packages.Package, goVersion string) []vendo
 	for _, ip := range importPaths {
 		p := pkgs[ip]
 
-		var key modKey
-		var goVer string
-		if m := p.Module; m != nil && ip == p.PkgPath && hasPathPrefix(m.Path, ip) {
-			key = modKey{path: m.Path, version: m.Version}
-			if goVer = m.GoVersion; goVer == "" {
-				goVer = noGoDirectiveVersion
-			}
-		} else {
-			// Either the package has no module (GOPATH mode), or
-			// it was reached through a nested vendor directory and
-			// so no longer belongs to the module go/packages
-			// reported it under. Give it a module of its own.
-			key = modKey{path: ip}
-			goVer = goVersion
+		mod := p.Module
+		if mod == nil {
+			return nil, fmt.Errorf("%w: %s", ErrNoModule, ip)
 		}
+		if !hasPathPrefix(mod.Path, ip) {
+			return nil, fmt.Errorf("package %s is attributed to module %s, which is not a prefix of its import path", ip, mod.Path)
+		}
+
+		key := modKey{path: mod.Path, version: mod.Version}
+		goVer := mod.GoVersion
+		if goVer == "" {
+			goVer = noGoDirectiveVersion
+		}
+		// A main module carries no version of its own.
 		if key.version == "" {
 			key.version = syntheticVersionFor(key.path)
 		}
@@ -146,7 +130,7 @@ func vendorManifest(pkgs map[string]*packages.Package, goVersion string) []vendo
 		}
 		return out[i].Version < out[j].Version
 	})
-	return out
+	return out, nil
 }
 
 // writeModule writes the go.mod and vendor/modules.txt that make the generated
@@ -155,7 +139,10 @@ func vendorManifest(pkgs map[string]*packages.Package, goVersion string) []vendo
 // The two files are generated together from the same package list because the
 // go tool rejects a vendor directory whose modules.txt disagrees with go.mod.
 func writeModule(dir string, pkgs map[string]*packages.Package, goVersion string) error {
-	mods := vendorManifest(pkgs, goVersion)
+	mods, err := vendorManifest(pkgs)
+	if err != nil {
+		return err
+	}
 
 	// The generated module must declare a go version at least as high as
 	// every module it vendors, the way `go mod tidy` would. Otherwise the

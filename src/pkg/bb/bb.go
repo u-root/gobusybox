@@ -24,12 +24,13 @@
 package bb
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
-	"golang.org/x/exp/maps"
 	"golang.org/x/tools/go/ast/astutil"
 	"golang.org/x/tools/go/packages"
 
@@ -46,6 +47,40 @@ var bbMainSource []byte
 
 //go:embed bbmain/register.go
 var bbRegisterSource []byte
+
+// ErrNoModule is returned when a command does not belong to a Go module.
+var ErrNoModule = errors.New("command is not in a Go module")
+
+// gopathRemedy is appended to every ErrNoModule message. Refusing a build that
+// used to work is only defensible if the refusal says what to do instead.
+const gopathRemedy = "GOPATH mode is no longer supported -- put each command in a module, and use `goanywhere` if they span several"
+
+// checkModules rejects commands that do not belong to a Go module.
+//
+// GOPATH mode is not merely unfashionable here, it is unrepresentable. It lets
+// one import path exist at two versions at once, each reached through a
+// different nested vendor directory, and the generated module vendors every
+// dependency into a single flat directory that can hold only one of them.
+// Collapsing the two would silently hand some command a version it was never
+// compiled against.
+//
+// In module mode the go tool has already chosen exactly one version per import
+// path -- by minimal version selection within a module, or across a workspace
+// -- before gobusybox sees anything, so the flat directory can always hold the
+// whole build.
+func checkModules(cmds []*bbinternal.Package) error {
+	var noModule []string
+	for _, cmd := range cmds {
+		if cmd.Pkg.Module == nil {
+			noModule = append(noModule, cmd.Pkg.PkgPath)
+		}
+	}
+	if len(noModule) == 0 {
+		return nil
+	}
+	sort.Strings(noModule)
+	return fmt.Errorf("%w: %s; %s", ErrNoModule, strings.Join(noModule, ", "), gopathRemedy)
+}
 
 func checkDuplicate(cmds []*bbinternal.Package) error {
 	seen := make(map[string]string)
@@ -111,6 +146,13 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return fmt.Errorf("Go build environment unspecified for busybox build")
 	} else if err := opts.Env.Valid(); err != nil {
 		return err
+	}
+	// Reject GOPATH mode before resolving anything. Package resolution
+	// fails in its own confusing ways under GO111MODULE=off, and the
+	// reason gobusybox cannot proceed has nothing to do with whichever
+	// path happens to fail first.
+	if opts.Env.GO111MODULE == "off" {
+		return fmt.Errorf("%w: GO111MODULE=off; %s", ErrNoModule, gopathRemedy)
 	}
 
 	var tmpDir string
@@ -187,17 +229,8 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return err
 	}
 
-	modules := make(map[string]struct{})
-	var numNoModule int
-	for _, cmd := range cmds {
-		if cmd.Pkg.Module != nil {
-			modules[cmd.Pkg.Module.Path] = struct{}{}
-		} else {
-			numNoModule++
-		}
-	}
-	if len(modules) > 0 && numNoModule > 0 {
-		return fmt.Errorf("gobusybox does not support mixed module/non-module compilation -- commands contain main modules %v", strings.Join(maps.Keys(modules), ", "))
+	if err := checkModules(cmds); err != nil {
+		return err
 	}
 
 	// Every package written into vendor/, keyed by the import path it is
@@ -209,7 +242,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 	var bbImports []string
 	// Rewrite commands to packages.
 	for _, cmd := range cmds {
-		ipath := vendorPkgPath(cmd.Pkg.PkgPath)
+		ipath := cmd.Pkg.PkgPath
 		if err := cmd.Rewrite(filepath.Join(vendorDir, ipath), bbMainImportPath); err != nil {
 			return fmt.Errorf("rewriting command %q failed: %v", cmd.Pkg.PkgPath, err)
 		}
@@ -321,7 +354,7 @@ func copyAllDeps(vendorDir string, mainPkgs []*bbinternal.Package, vendored map[
 	}
 
 	for _, p := range deps {
-		ipath := vendorPkgPath(p.PkgPath)
+		ipath := p.PkgPath
 		if _, ok := vendored[ipath]; ok {
 			continue
 		}
