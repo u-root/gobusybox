@@ -50,6 +50,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
+          cache-dependency-path: src/go.sum
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
@@ -82,6 +83,7 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          cache-dependency-path: src/go.sum
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
@@ -112,6 +114,11 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          # This job builds src/cmd/makebb and then runs the tests in test/,
+          # which is a separate module.
+          cache-dependency-path: |
+            src/go.sum
+            test/go.sum
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
@@ -143,6 +150,10 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          # test-external-workspaces.sh ends with `go clean -cache -modcache`,
+          # so this job would save an emptied cache under a key the other jobs
+          # share. Opt out rather than poison it.
+          cache: false
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
