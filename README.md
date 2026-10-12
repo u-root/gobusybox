@@ -1,7 +1,7 @@
 # Go Busybox
 
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src)
-[![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/main)
+[![Build Status](https://github.com/u-root/gobusybox/actions/workflows/go.yml/badge.svg)](https://github.com/u-root/gobusybox/actions/workflows/go.yml)
 [![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
 
 **Contact**: best bet to reach us is the
