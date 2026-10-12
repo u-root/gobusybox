@@ -19,8 +19,8 @@
 //
 // Principally, the AST transformation moves all global side-effects into
 // callable package functions. E.g. `main` becomes `registeredMain`, each
-// `init` becomes `initN`, and global variable assignments are moved into their
-// own `initN`.
+// `init` becomes a numbered `busyboxInitN`, and global variable assignments
+// are moved into their own `busyboxInitN`.
 package bb
 
 import (

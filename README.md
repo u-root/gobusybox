@@ -300,9 +300,11 @@ ln -s bb strace
 ### Command Transformation
 
 Principally, the AST transformation moves all global side-effects into callable
-package functions. E.g. `main` becomes `registeredMain`, each `init` becomes
-`initN`, and global variable assignments are moved into their own `initN`. A
-`registeredInit` calls each `initN` function in the correct init order.
+package functions. E.g. `main` becomes `registeredMain`, each `init` becomes a
+numbered `busyboxInitN`, and each global variable assignment is moved into its
+own `busyboxInitN`. `busyboxInit0` calls the variable initializers in the order
+`go/types` computed, and a `registeredInit` calls `busyboxInit0` followed by
+the bodies of the original `init` functions.
 
 Then, these `registeredMain` and `registeredInit` functions can be registered
 with a global map of commands by name and used when called upon.
@@ -332,7 +334,7 @@ func main() {
 This would be rewritten to be:
 
 ```go
-package sl // based on the directory name
+package bbsl // "bb" + the command name
 
 import (
   "flag"
@@ -344,22 +346,26 @@ import (
 // Type has to be inferred through type checking.
 var name *string
 
-func init0() {
+func busyboxInit2() {
   log.Printf("init %s", *name)
-}
-
-func init1() {
-  name = flag.String("name", "", "Gimme name")
-}
-
-func registeredInit() {
-  // Order is determined by go/types.Info.InitOrder.
-  init1()
-  init0()
 }
 
 func registeredMain() {
   log.Printf("train")
+}
+
+func busyboxInit1() {
+  name = flag.String("name", "", "Gimme name")
+}
+
+func busyboxInit0() {
+  // Order is determined by go/types.Info.InitOrder.
+  busyboxInit1()
+}
+
+func registeredInit() {
+  busyboxInit0()
+  busyboxInit2()
 }
 
 func init() {
