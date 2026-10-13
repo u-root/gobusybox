@@ -166,7 +166,9 @@ func main() {
 	}
 
 	if *list {
-		cmds, err := listCommands(env, patterns)
+		cmds, err := listCommands(patterns, func(path string) ([]string, error) {
+			return mainPackages(env, path)
+		})
 		if err != nil {
 			l.Fatalf("Listing commands failed: %v", err)
 		}
@@ -269,19 +271,30 @@ func moduleDir(keep string) (string, bool, error) {
 	return dir, true, nil
 }
 
+// writeGoMod gives modDir a go.mod, unless it already has one.
+//
+// Writing the file rather than running `go mod init` is what makes -mod-dir
+// reusable: init refuses a directory that already has a go.mod, and that file
+// is the record of which versions the last run resolved.
+func writeGoMod(modDir string) error {
+	gomod := filepath.Join(modDir, "go.mod")
+	switch _, err := os.Stat(gomod); {
+	case err == nil:
+		return nil
+	case !os.IsNotExist(err):
+		return err
+	}
+	contents := fmt.Sprintf("module %s\n", synthModulePath)
+	if err := os.WriteFile(gomod, []byte(contents), 0o644); err != nil {
+		return fmt.Errorf("writing go.mod: %w", err)
+	}
+	return nil
+}
+
 // fetch writes a module requiring everything the patterns name, leaving the
 // source in the module cache and the chosen versions in its go.mod.
-//
-// Writing go.mod directly rather than running `go mod init` keeps this correct
-// when -mod-dir is reused: init fails on a directory that already has one.
 func fetch(l *log.Logger, env *golang.Environ, modDir string, patterns []pattern) error {
-	gomod := filepath.Join(modDir, "go.mod")
-	if _, err := os.Stat(gomod); os.IsNotExist(err) {
-		contents := fmt.Sprintf("module %s\n", synthModulePath)
-		if err := os.WriteFile(gomod, []byte(contents), 0o644); err != nil {
-			return fmt.Errorf("writing go.mod: %w", err)
-		}
-	} else if err != nil {
+	if err := writeGoMod(modDir); err != nil {
 		return err
 	}
 
@@ -308,29 +321,36 @@ func fetch(l *log.Logger, env *golang.Environ, modDir string, patterns []pattern
 	return nil
 }
 
+// commandLister reports the commands one pattern matches.
+//
+// listCommands takes it as a parameter so that which commands a pattern covers
+// and which of them survive the exclusions stay separable: the first needs a
+// module on disk to ask about, the second is arithmetic.
+type commandLister func(path string) ([]string, error)
+
 // listCommands returns the import paths the patterns match that are commands.
 //
 // This is the same question makebb answers while building, asked without
 // building, so that a caller can see what a pattern covers before committing
 // to it. Exclusions are applied here too, so the list matches what a build
 // with these arguments would contain.
-func listCommands(env *golang.Environ, patterns []pattern) ([]string, error) {
+//
+// Order follows the command line, because the caller wrote it in the order
+// they did for a reason, and a command matched by two patterns keeps the
+// position of the first.
+func listCommands(patterns []pattern, list commandLister) ([]string, error) {
 	excluded := map[string]bool{}
 	var include []string
 	for _, p := range patterns {
+		paths, err := list(p.path)
+		if err != nil {
+			return nil, err
+		}
 		if p.exclude {
-			paths, err := mainPackages(env, p.path)
-			if err != nil {
-				return nil, err
-			}
 			for _, path := range paths {
 				excluded[path] = true
 			}
 			continue
-		}
-		paths, err := mainPackages(env, p.path)
-		if err != nil {
-			return nil, err
 		}
 		include = append(include, paths...)
 	}
