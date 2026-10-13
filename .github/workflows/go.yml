@@ -40,10 +40,27 @@ concurrency:
 # Written to $GITHUB_ENV rather than an `env:` block because setup-go exports
 # its value that way too, and the last write to $GITHUB_ENV wins. The
 # precedence of `env:` against $GITHUB_ENV is undocumented; do not rely on it.
+#
+# Every job also pins ubuntu-26.04 rather than riding ubuntu-latest.
+#
+# The ubuntu-latest label is being repointed at 26.04 over several weeks from
+# 2026-10-19 (actions/runner-images#14748), so an unpinned job would migrate
+# partway through that window, and a failure would surface on some runs and
+# not others. Pinning turns that into one deliberate change.
+#
+# 26.04 is a real risk for this repository in particular: it mounts /tmp as a
+# RAM-backed tmpfs capped near 7.8G, with a per-user quota
+# (actions/runner-images#14777, still open upstream). makebb writes the tree
+# it generates, vendor directory included, under os.MkdirTemp (see
+# src/pkg/bb/bb.go), and `go build` puts $WORK there too;
+# test-external-workspaces.sh then builds u-root, gokrazy and p9 for three
+# architectures. If that exceeds the quota the failure reads "disk quota
+# exceeded" from the compiler, which names nothing useful. Point TMPDIR at
+# the root disk, which has far more room, if it does.
 jobs:
   tidy:
     name: Tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - uses: actions/checkout@v7
       - name: Setup Go
@@ -71,7 +88,7 @@ jobs:
 
   unit-test:
     name: Unit Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
@@ -101,7 +118,7 @@ jobs:
 
   test-gomodule:
     name: gobuilds
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
@@ -132,7 +149,7 @@ jobs:
 
   test-external-workspaces:
     name: test-external-workspaces
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
