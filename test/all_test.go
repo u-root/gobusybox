@@ -76,11 +76,11 @@ func TestMakeBB(t *testing.T) {
 			wd:       filepath.Join(wd, "implicitimport"),
 			want:     map[string]string{"loghello": "Log Hello\n"},
 		},
-		/*{
+		{
 			testname: "nested-modules",
 			cmds:     []string{"./cmd/dmesg", "./cmd/strace", "./nestedmod/cmd/p9ufs"},
 			wd:       filepath.Join(wd, "nested"),
-		},*/
+		},
 		{
 			testname: "cross-module-deps",
 			wd:       filepath.Join(wd, "normaldeps/mod1"),
