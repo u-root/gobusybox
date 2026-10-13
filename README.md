@@ -17,6 +17,7 @@ determine which command is being called.
 | ---------- | ----------------------------------------------------- |
 | Go version | 1.25 and later (see src/go.mod)                       |
 | Packaging  | Go workspaces, Go modules, Go vendoring               |
+| Source     | A checkout, or the module proxy (see `gomodbb`)       |
 | `GOOS`     | any (linux is tested)                                 |
 | `GOARCH`   | any (amd64, arm, arm64, riscv64 are tested)           |
 | CGO        | *Not supported*                                       |
@@ -74,6 +75,80 @@ makebb ./cpu/cmds/* ./p9/cmd/*
 > `makebb` works any time `go build` or `go list` also work.
 >
 > For multi-module compilation, use Go workspaces or read below.
+
+## gomodbb: building without a checkout
+
+`makebb` builds commands that are already on disk, so every input has to be
+cloned first, and commands from several projects have to be arranged into a Go
+workspace before any of them can be named.
+
+`gomodbb` skips both steps. The go command already knows how to fetch a module
+and hand back its source, so `gomodbb` asks it to, and builds from the copy in
+the module cache:
+
+```sh
+go install github.com/u-root/gobusybox/src/cmd/gomodbb@latest
+
+gomodbb github.com/u-root/u-root/cmds/core/...@main
+```
+
+No `git clone`, and no `go work init` even across projects:
+
+```sh
+gomodbb -o bb \
+    github.com/u-root/u-root/cmds/core/...@main \
+    github.com/u-root/cpu/cmds/...@main \
+    github.com/hugelgupf/p9/cmd/...@latest
+```
+
+Nothing there names a project `gomodbb` knows about. A pattern is handed to
+`go get`, which decides which module provides it, so any module the go command
+can fetch works.
+
+### Choosing a version
+
+Everything after the last `@` is a version query, and it means what it means to
+`go get`:
+
+| Query | Selects |
+| --- | --- |
+| *(omitted)* | The highest release tag, as `go get` would |
+| `@main` | The tip of that branch |
+| `@v0.16.0` | That tag |
+| `@98a84dad0e9c` | That revision |
+
+> [!CAUTION]
+> `@HEAD` is not the tip of the default branch. It is a version query like any
+> other, and resolves through the proxy to whatever it last recorded under that
+> name, which can be months old. Use `@main`, or whatever the branch is called.
+
+Omitting the query is the reproducible choice and the surprising one: for a
+project that tags rarely, the newest release can be far behind the branch
+`git clone` would have given you.
+
+### Listing what a pattern covers
+
+`-l` prints the commands a pattern matches and builds nothing. It applies
+exclusions, so the list is exactly what a build with the same arguments would
+contain, and it prints to stdout with everything else on stderr:
+
+```sh
+gomodbb -l github.com/u-root/u-root/cmds/core/...@main | wc -l
+```
+
+### Pinning
+
+`-mod-dir` keeps the module `gomodbb` writes to do the fetching, whose `go.mod`
+records the version every pattern resolved to:
+
+```sh
+gomodbb -mod-dir ./pins github.com/u-root/u-root/cmds/core/...@main
+grep 'u-root/u-root ' ./pins/go.mod
+#	github.com/u-root/u-root v0.16.1-0.20261010115301-98a84dad0e9c // indirect
+```
+
+Pass that directory again to build from the same versions. `gomodbb` reuses an
+existing `go.mod` rather than overwriting it.
 
 ## Path resolution & multi-module builds
 
