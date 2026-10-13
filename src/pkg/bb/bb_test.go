@@ -7,6 +7,8 @@ package bb
 import (
 	"errors"
 	"path"
+	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -181,4 +183,71 @@ func TestCheckDuplicate(t *testing.T) {
 			t.Errorf("checkDuplicate() = %q, want it to show an exclusion to copy", err)
 		}
 	})
+}
+
+// dep is a package that imports others, for building a graph collectDeps can
+// walk. packages.Visit follows Imports, so that is the only edge it needs.
+func dep(pkgPath string, mod *packages.Module, imports ...*packages.Package) *packages.Package {
+	p := &packages.Package{PkgPath: pkgPath, Module: mod, Imports: map[string]*packages.Package{}}
+	for _, i := range imports {
+		p.Imports[i.PkgPath] = i
+	}
+	return p
+}
+
+func TestCollectDeps(t *testing.T) {
+	someModule := &packages.Module{Path: "example.com/m", Version: "v1.0.0", GoVersion: "1.21"}
+
+	// A module path is not required to contain a dot. Only a module fetched
+	// by its path has to look like a domain, so `module nodot` is legal,
+	// and its packages have to be vendored like any other.
+	dotless := &packages.Module{Path: "nodot", GoVersion: "1.21"}
+
+	for _, tt := range []struct {
+		name string
+		in   *packages.Package
+		want []string
+	}{
+		{
+			name: "standard library is not vendored",
+			in:   dep("example.com/m/cmd", someModule, dep("fmt", nil), dep("os", nil)),
+			want: []string{"example.com/m/cmd"},
+		},
+		{
+			// The case the dot test got wrong: every component of
+			// these paths is dotless, so each was taken for
+			// standard library and left out of the vendor
+			// directory. The build then failed looking for
+			// nodot/pkg/hello in GOROOT.
+			name: "dotless module path is vendored",
+			in:   dep("nodot/cmd/hi", dotless, dep("nodot/pkg/hello", dotless, dep("fmt", nil))),
+			want: []string{"nodot/cmd/hi", "nodot/pkg/hello"},
+		},
+		{
+			name: "dotted module path is still vendored",
+			in: dep("example.com/m/cmd", someModule,
+				dep("example.com/m/pkg", someModule),
+				dep("fmt", nil)),
+			want: []string{"example.com/m/cmd", "example.com/m/pkg"},
+		},
+		{
+			// A standard library package that imports another one
+			// must not drag it in.
+			name: "transitive standard library is not vendored",
+			in:   dep("example.com/m/cmd", someModule, dep("os", nil, dep("internal/abi", nil))),
+			want: []string{"example.com/m/cmd"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var got []string
+			for _, p := range collectDeps(tt.in) {
+				got = append(got, p.PkgPath)
+			}
+			sort.Strings(got)
+			sort.Strings(tt.want)
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("collectDeps() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

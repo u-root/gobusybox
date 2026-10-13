@@ -413,10 +413,20 @@ func collectDeps(p *packages.Package) []*packages.Package {
 	// The generated module vendors everything, so we need a copy of *ALL*
 	// non-standard-library dependencies in the temporary directory.
 	return deps(p, func(pkg *packages.Package) bool {
-		// First component of package path contains a "."?
+		// Standard library packages belong to no module, and every
+		// other package belongs to one: its own main module, a
+		// dependency module, or a workspace member. go/packages fills
+		// this in because findpkg asks for packages.NeedModule, so it
+		// is the go tool's own answer rather than a guess at one.
 		//
-		// Poor man's standard library test.
-		firstComp := strings.SplitN(pkg.PkgPath, "/", 2)
-		return strings.Contains(firstComp[0], ".")
+		// The guess this replaced was whether the first path component
+		// contained a dot. Module paths are not required to contain
+		// one -- `module nodot` is legal for anything not fetched by
+		// path -- and such a package was taken for standard library,
+		// left unvendored, and failed the build it was part of:
+		//
+		//	vendor/nodot/cmd/hi/main.go:6:2:
+		//	package nodot/pkg/hello is not in std
+		return pkg.Module != nil
 	})
 }
