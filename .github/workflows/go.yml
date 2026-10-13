@@ -20,16 +20,39 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Every job restores GOTOOLCHAIN=auto right after setting Go up.
+#
+# actions/setup-go v6 began exporting GOTOOLCHAIN=local unconditionally, so a
+# `go` command can never fetch a toolchain newer than the one the action
+# installed. That default is wrong here: makebb gives the module it generates
+# a `go` directive at least as high as the highest directive among the modules
+# it vendors, because the go tool otherwise refuses the build outright ("X in
+# vendor/modules.txt requires go >= Y"). Satisfying that directive is exactly
+# the toolchain selection v6 forbids; see writeModule in src/pkg/bb/module.go.
+# v4 never set GOTOOLCHAIN, so this restores the old behaviour rather than
+# inventing a new one.
+#
+# The pins in test-external-workspaces.sh are old enough not to trip this
+# today, but u-root's main branch already declares go 1.26.6, so once those
+# pins move, the older matrix entry would fail with an error naming
+# GOTOOLCHAIN rather than anything about makebb.
+#
+# Written to $GITHUB_ENV rather than an `env:` block because setup-go exports
+# its value that way too, and the last write to $GITHUB_ENV wins. The
+# precedence of `env:` against $GITHUB_ENV is undocumented; do not rely on it.
 jobs:
   tidy:
     name: Tidy
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: gofmt
         run: cd src && test -z "$(gofmt -s -l $(find -name '*.go'))"
@@ -53,12 +76,15 @@ jobs:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |
@@ -80,12 +106,15 @@ jobs:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |
@@ -108,12 +137,15 @@ jobs:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |
