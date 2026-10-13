@@ -79,10 +79,13 @@ path is `.../test/injectldvar`.
 ### nested
 
 A module, `nestedmod`, inside another module's directory tree. `cmd/dmesg` and
-`cmd/strace` belong to the outer module; `nestedmod/cmd/p9ufs` does not.
-Building commands from both at once needs a Go workspace, since `makebb`
-requires Go modules and no longer has a GOPATH mode to fall back on. The
-matching case in `all_test.go` is commented out for that reason.
+`cmd/strace` belong to the outer module; `nestedmod/cmd/p9ufs` does not, so a
+module's directory tree is not its package set.
+
+Building commands from both at once needs the `go.work` here, since `makebb`
+requires Go modules and no longer has a GOPATH mode to fall back on. Remove it
+and the case fails: the go tool reports that the main module does not contain
+`nestedmod/cmd/p9ufs`.
 
 The outer module alone is what the "How It Works" section of the top-level
 `README.md` builds.
