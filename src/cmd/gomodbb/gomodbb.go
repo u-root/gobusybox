@@ -380,7 +380,7 @@ func mainPackages(env *golang.Environ, path string) ([]string, error) {
 		return nil, fmt.Errorf("`go list %s`: %w", path, err)
 	}
 	var paths []string
-	for _, line := range strings.Split(string(out), "\n") {
+	for line := range strings.SplitSeq(string(out), "\n") {
 		if line = strings.TrimSpace(line); line != "" {
 			paths = append(paths, line)
 		}
