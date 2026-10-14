@@ -105,6 +105,14 @@ Nothing there names a project `gomodbb` knows about. A pattern is handed to
 `go get`, which decides which module provides it, so any module the go command
 can fetch works.
 
+### No VCS will be used
+
+Packages and commands must be available in proxy.golang.org:
+gomodbb sets GOPROXY to `https://proxy.golang.org` not `https://proxy.golang.org,direct`
+as the standard go command sets it. Therefore, go will not fallback to
+git or some other VCS. This is helpful on systems like Plan 9  which do not
+support the standard git command.
+
 ### Choosing a version
 
 Everything after the last `@` is a version query, and it means what it means to
