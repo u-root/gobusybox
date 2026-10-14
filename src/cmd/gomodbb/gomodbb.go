@@ -251,6 +251,7 @@ func goCmd(env *golang.Environ, gocmd string, args ...string) *exec.Cmd {
 	if path != "" {
 		cmd.Env = append(cmd.Env, "PATH="+path)
 	}
+	cmd.Env = append(cmd.Env, "GOPROXY=https://proxy.golang.org")
 	return cmd
 }
 
