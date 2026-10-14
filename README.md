@@ -109,9 +109,12 @@ can fetch works.
 
 Packages and commands must be available in proxy.golang.org:
 gomodbb sets GOPROXY to `https://proxy.golang.org` not `https://proxy.golang.org,direct`
-as the standard go command sets it. Therefore, go will not fallback to
-git or some other VCS. This is helpful on systems like Plan 9  which do not
-support the standard git command.
+as the standard go command sets it, so there is no fallback to git or some
+other VCS. Pinning GOPROXY is not enough on its own, because `GOPRIVATE` and
+`GONOPROXY` name paths that bypass the proxy and are fetched with git, so
+gomodbb clears both and sets `GOVCS=*:off`, which turns any remaining attempt
+to use a VCS into an error that says so. This is helpful on systems like
+Plan 9, which do not support the standard git command.
 
 ### Choosing a version
 
