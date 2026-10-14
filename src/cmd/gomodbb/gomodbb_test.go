@@ -205,33 +205,47 @@ func TestListCommands(t *testing.T) {
 	}
 }
 
-// golang.Environ sets PATH to $GOROOT/bin alone. That is invisible to a tool
-// that only compiles, but the go command runs git to fetch anything the proxy
-// cannot serve, and git is on the caller's PATH:
-//
-//	go: ...: unable to resolve git version: failed to execute git version:
-//	exec: "git": executable file not found in $PATH
-func TestGoCmdKeepsTheCallersPath(t *testing.T) {
-	t.Setenv("PATH", "/usr/bin:/bin")
-
-	env := golang.Default(golang.WithGOROOT("/fake/goroot"))
-	cmd := goCmd(env, "get", "example.com/m")
-
-	// exec uses the last value for a repeated key, so the effective PATH
-	// is the last one set, not the first.
+// lastEnv returns the value exec will use for key, which is the last one set.
+func lastEnv(env []string, key string) string {
 	var got string
-	for _, kv := range cmd.Env {
-		if v, ok := strings.CutPrefix(kv, "PATH="); ok {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, key+"="); ok {
 			got = v
 		}
 	}
+	return got
+}
 
-	want := filepath.Join("/fake/goroot", "bin") + string(os.PathListSeparator) + "/usr/bin:/bin"
-	if got != want {
-		t.Errorf("goCmd() PATH = %q, want %q", got, want)
-	}
-	if !strings.Contains(got, "/usr/bin") {
-		t.Errorf("goCmd() PATH = %q, want it to keep the caller's entries", got)
+// gomodbb fetches through the module proxy and never through a version control
+// tool, so a caller's GOPRIVATE and GONOPROXY must not survive into the go
+// command: both name paths that bypass the proxy and are fetched with git.
+// Leaving them in place does not merely pick a different source, it fails,
+// because golang.Environ reduces PATH to $GOROOT/bin and git is not on it:
+//
+//	go: github.com/u-root/uio@latest: unable to resolve git version:
+//	failed to execute git version: exec: "git": executable file not found in $PATH
+func TestGoCmdNeverUsesAVCS(t *testing.T) {
+	// Values a caller might plausibly have, each of which would otherwise
+	// send the go command to a VCS.
+	t.Setenv("GOPROXY", "direct")
+	t.Setenv("GOPRIVATE", "github.com/u-root/*")
+	t.Setenv("GONOPROXY", "github.com/u-root/*")
+	t.Setenv("GOVCS", "*:all")
+
+	cmd := goCmd(golang.Default(), "get", "example.com/m")
+
+	for _, tt := range []struct {
+		key  string
+		want string
+	}{
+		{"GOPROXY", "https://proxy.golang.org"},
+		{"GOPRIVATE", ""},
+		{"GONOPROXY", ""},
+		{"GOVCS", "*:off"},
+	} {
+		if got := lastEnv(cmd.Env, tt.key); got != tt.want {
+			t.Errorf("goCmd() %s = %q, want %q", tt.key, got, tt.want)
+		}
 	}
 }
 

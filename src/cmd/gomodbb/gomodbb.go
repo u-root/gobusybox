@@ -5,18 +5,11 @@
 // gomodbb compiles many Go commands into one bb-style binary, fetching their
 // source through the module proxy rather than requiring a checkout.
 //
-// makebb builds commands that are already on disk, which means every input has
-// to be cloned first, and commands from several projects have to be arranged
-// into a Go workspace before any of them can be named. Neither step says
-// anything about the busybox being built. The go command already knows how to
-// fetch a module and hand back its source, so gomodbb asks it to:
-//
 //	gomodbb github.com/u-root/u-root/cmds/core/...@main
 //
 // It does that by writing a module whose only purpose is to require what the
 // patterns name, which is what turns a package pattern into the module that
-// provides it. That module is the go command's job, not this one's: there is
-// no table of known projects here, and adding one would be a bug.
+// provides it.
 package main
 
 import (
@@ -83,16 +76,19 @@ func (p pattern) fetchSpec() string {
 // the query. Splitting on the last rather than the first matters for a path
 // that already carries a major version suffix, such as gopkg.in/yaml.v2.
 func parsePattern(arg string) pattern {
+	arg = strings.TrimSpace(arg)
+
 	var p pattern
 	if rest, ok := strings.CutPrefix(arg, "-"); ok {
 		p.exclude = true
 		arg = rest
 	}
+
+	p.path = arg
 	if i := strings.LastIndex(arg, "@"); i >= 0 {
 		p.path, p.query = arg[:i], arg[i+1:]
-	} else {
-		p.path = arg
 	}
+
 	return p
 }
 
@@ -104,154 +100,29 @@ func (p pattern) commandPath() string {
 	return p.path
 }
 
-func main() {
-	bopts := &golang.BuildOpts{}
-	bopts.RegisterFlags(flag.CommandLine)
-	env := golang.Default()
-	env.RegisterFlags(flag.CommandLine)
-	flag.Parse()
-
-	// Diagnostics go to stderr, unlike makebb, which writes them to stdout.
-	// -l exists to be piped into something, and a progress line landing in
-	// the middle of the list it printed would defeat that.
-	l := log.New(os.Stderr, "", log.Ltime)
-
-	if flag.NArg() == 0 {
-		l.Fatalf("Usage: %s [flags] <pattern>[@version]...\n\ne.g. %s github.com/u-root/u-root/cmds/core/...@main",
-			filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
-	}
-
-	var patterns []pattern
-	for _, arg := range flag.Args() {
-		patterns = append(patterns, parsePattern(arg))
-	}
-
-	o, err := filepath.Abs(*outputPath)
-	if err != nil {
-		l.Fatal(err)
-	}
-
-	if env.CgoEnabled {
-		l.Printf("Disabling CGO for u-root...")
-		env.CgoEnabled = false
-	}
-	if err := env.CompilerInit(); err != nil {
-		l.Fatal(err)
-	}
-
-	l.Printf("Build environment: %s\n", env)
-	l.Printf("Compiler: %s\n", env.Compiler.VersionOutput)
-
-	modDir, removeModDir, err := moduleDir(*keepModule)
-	if err != nil {
-		l.Fatal(err)
-	}
-	if removeModDir {
-		defer os.RemoveAll(modDir)
-	}
-
-	// Every go invocation from here on runs in the module just created,
-	// and must ignore any workspace that happens to enclose it: a go.work
-	// above the temporary directory would otherwise decide the build list
-	// for a module that is not one of its members.
-	env.Apply(golang.WithWorkingDir(modDir), golang.WithGOWORK("off"))
-
-	if err := fetch(l, env, modDir, patterns); err != nil {
-		l.Fatalf("Fetching source failed: %v", err)
-	}
-
-	var commandPaths []string
-	for _, p := range patterns {
-		commandPaths = append(commandPaths, p.commandPath())
-	}
-
-	if *list {
-		cmds, err := listCommands(patterns, func(path string) ([]string, error) {
-			return mainPackages(env, path)
-		})
-		if err != nil {
-			l.Fatalf("Listing commands failed: %v", err)
-		}
-		for _, c := range cmds {
-			fmt.Println(c)
-		}
-		return
-	}
-
-	tmpDir := *genDir
-	remove := false
-	if tmpDir == "" {
-		tdir, err := os.MkdirTemp("", "bb-")
-		if err != nil {
-			l.Fatalf("Could not create busybox source directory: %v", err)
-		}
-		tmpDir = tdir
-		remove = true
-	}
-
-	opts := &bb.Opts{
-		Env:          env,
-		GenSrcDir:    tmpDir,
-		CommandPaths: commandPaths,
-		BinaryPath:   o,
-		GoBuildOpts:  bopts,
-		GenerateOnly: *genOnly,
-	}
-	if err := bb.BuildBusybox(l, opts); err != nil {
-		remove = false
-		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)
-	} else if opts.GenerateOnly {
-		l.Printf("Generated source can be found in %s. `cd %s && GOWORK=off go build -mod=vendor` to build.", tmpDir, tmpDir)
-	}
-	if remove && !opts.GenerateOnly && !*keep {
-		os.RemoveAll(tmpDir)
-	} else {
-		l.Printf("Keeping temp dir %v", tmpDir)
-	}
-
-	path := *outputPath
-	if stat, err := os.Stat(path); err == nil {
-		if stat.IsDir() {
-			path = filepath.Join(path, "bb")
-			stat, err = os.Stat(path)
-			if err != nil {
-				return
-			}
-		}
-		l.Printf("Successfully built %q (size %d bytes -- %s).", path, stat.Size(), humanize.IBytes(uint64(stat.Size())))
-	}
-}
-
 // goCmd returns a go command to run against the fetching module.
 //
-// golang.Environ sets PATH to $GOROOT/bin alone, so that the chosen toolchain
-// is the one x/tools finds. Nothing makebb runs looks further than that,
-// because compiling shells out to nothing. Fetching does: the go command runs
-// version control tools for any module the proxy cannot serve, which covers
-// private modules and everything at all under GOPROXY=direct, and those live
-// on the caller's PATH:
+// Source comes from the module proxy, never from a version control tool.
+// Pinning GOPROXY does not establish that on its own: GOPRIVATE and GONOPROXY
+// name paths that bypass the proxy and are fetched with git, and both are read
+// from the caller's environment. Clearing them makes the pinned proxy
+// authoritative, and GOVCS refuses the fetch if anything still reaches for a
+// VCS, which reports the policy instead of the missing tool. The distinction
+// matters because golang.Environ reduces PATH to $GOROOT/bin, so git is not
+// found even when the caller has it:
 //
 //	go: github.com/u-root/uio@latest: unable to resolve git version:
 //	failed to execute git version: exec: "git": executable file not found in $PATH
 //
-// Keep $GOROOT/bin first so the toolchain still wins, and restore the rest
-// behind it. exec uses the last value for a repeated key, so this overrides
-// what Environ set without disturbing the other variables.
+// exec uses the last value for a repeated key, so these override the caller's.
 func goCmd(env *golang.Environ, gocmd string, args ...string) *exec.Cmd {
 	cmd := env.GoCmd(gocmd, args...)
-	path := os.Getenv("PATH")
-	if env.GOROOT != "" {
-		gorootBin := filepath.Join(env.GOROOT, "bin")
-		if path == "" {
-			path = gorootBin
-		} else {
-			path = gorootBin + string(os.PathListSeparator) + path
-		}
-	}
-	if path != "" {
-		cmd.Env = append(cmd.Env, "PATH="+path)
-	}
-	cmd.Env = append(cmd.Env, "GOPROXY=https://proxy.golang.org")
+	cmd.Env = append(cmd.Env,
+		"GOPROXY=https://proxy.golang.org",
+		"GOPRIVATE=",
+		"GONOPROXY=",
+		"GOVCS=*:off",
+	)
 	return cmd
 }
 
@@ -386,4 +257,122 @@ func mainPackages(env *golang.Environ, path string) ([]string, error) {
 		}
 	}
 	return paths, nil
+}
+
+func main() {
+	bopts := &golang.BuildOpts{}
+	bopts.RegisterFlags(flag.CommandLine)
+	env := golang.Default()
+	env.RegisterFlags(flag.CommandLine)
+	flag.Parse()
+
+	// Diagnostics go to stderr, unlike makebb, which writes them to stdout.
+	// -l exists to be piped into something, and a progress line landing in
+	// the middle of the list it printed would defeat that.
+	l := log.New(os.Stderr, "", log.Ltime)
+
+	if flag.NArg() == 0 {
+		l.Fatalf("Usage: %s [flags] <pattern>[@version]...\n\ne.g. %s github.com/u-root/u-root/cmds/core/...@main",
+			filepath.Base(os.Args[0]), filepath.Base(os.Args[0]))
+	}
+
+	var patterns []pattern
+	for _, arg := range flag.Args() {
+		patterns = append(patterns, parsePattern(arg))
+	}
+
+	o, err := filepath.Abs(*outputPath)
+	if err != nil {
+		l.Fatal(err)
+	}
+
+	if env.CgoEnabled {
+		l.Printf("Disabling CGO for u-root...")
+		env.CgoEnabled = false
+	}
+	if err := env.CompilerInit(); err != nil {
+		l.Fatal(err)
+	}
+
+	l.Printf("Build environment: %s\n", env)
+	l.Printf("Compiler: %s\n", env.Compiler.VersionOutput)
+
+	modDir, removeModDir, err := moduleDir(*keepModule)
+	if err != nil {
+		l.Fatal(err)
+	}
+	if removeModDir {
+		defer os.RemoveAll(modDir)
+	}
+
+	// Every go invocation from here on runs in the module just created,
+	// and must ignore any workspace that happens to enclose it: a go.work
+	// above the temporary directory would otherwise decide the build list
+	// for a module that is not one of its members.
+	env.Apply(golang.WithWorkingDir(modDir), golang.WithGOWORK("off"))
+
+	if err := fetch(l, env, modDir, patterns); err != nil {
+		l.Fatalf("Fetching source failed: %v", err)
+	}
+
+	var commandPaths []string
+	for _, p := range patterns {
+		commandPaths = append(commandPaths, p.commandPath())
+	}
+
+	if *list {
+		cmds, err := listCommands(patterns, func(path string) ([]string, error) {
+			return mainPackages(env, path)
+		})
+		if err != nil {
+			l.Fatalf("Listing commands failed: %v", err)
+		}
+		for _, c := range cmds {
+			fmt.Println(c)
+		}
+		return
+	}
+
+	tmpDir := *genDir
+	remove := false
+	if tmpDir == "" {
+		tdir, err := os.MkdirTemp("", "bb-")
+		if err != nil {
+			l.Fatalf("Could not create busybox source directory: %v", err)
+		}
+		tmpDir = tdir
+		remove = true
+	}
+
+	opts := &bb.Opts{
+		Env:          env,
+		GenSrcDir:    tmpDir,
+		CommandPaths: commandPaths,
+		BinaryPath:   o,
+		GoBuildOpts:  bopts,
+		GenerateOnly: *genOnly,
+	}
+	if err := bb.BuildBusybox(l, opts); err != nil {
+		remove = false
+		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)
+	} else if opts.GenerateOnly {
+		l.Printf("Generated source can be found in %s. `cd %s && GOWORK=off go build -mod=vendor` to build.", tmpDir, tmpDir)
+	}
+	if remove && !opts.GenerateOnly && !*keep {
+		os.RemoveAll(tmpDir)
+	} else {
+		l.Printf("Keeping temp dir %v", tmpDir)
+	}
+
+	path := *outputPath
+	if stat, err := os.Stat(path); err == nil {
+		if stat.IsDir() {
+			path = filepath.Join(path, "bb")
+			stat, err = os.Stat(path)
+			if err != nil {
+				return
+			}
+		}
+		l.Printf("Successfully built %q (size %d bytes -- %s).", path, stat.Size(), humanize.IBytes(uint64(stat.Size())))
+	}
 }
