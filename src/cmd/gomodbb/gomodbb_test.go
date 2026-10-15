@@ -115,6 +115,140 @@ func TestCommandPathDropsTheVersionQuery(t *testing.T) {
 	}
 }
 
+// The go command has no "*", so a globbed pattern is widened to the "..."
+// containing it, fetched, and narrowed again by matching. The point of the
+// exercise is that "*" stops at a path separator where "..." does not, so
+// a glob selects one level and nothing below it.
+func TestGlobbedPatternSelectsOneLevel(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		pattern   string
+		wantFetch string
+		match     map[string]bool
+	}{
+		{
+			name:      "glob is widened to the enclosing ...",
+			pattern:   "m/cmds/core/*",
+			wantFetch: "m/cmds/core/...",
+			match: map[string]bool{
+				"m/cmds/core/ls": true,
+				// The case this exists for: a helper a level
+				// deeper than the commands is not a command.
+				"m/cmds/core/man/gen": false,
+				"m/cmds/exp/cbmem":    false,
+			},
+		},
+		{
+			name:      "... is left alone and matches whatever it returned",
+			pattern:   "m/cmds/core/...",
+			wantFetch: "m/cmds/core/...",
+			match: map[string]bool{
+				"m/cmds/core/ls":      true,
+				"m/cmds/core/man/gen": true,
+			},
+		},
+		{
+			name:      "a plain path is left alone",
+			pattern:   "m/cmds/core/ls",
+			wantFetch: "m/cmds/core/ls",
+			match:     map[string]bool{"m/cmds/core/ls": true},
+		},
+		{
+			name:      "a glob partway along widens at that element",
+			pattern:   "m/cmds/*/ls",
+			wantFetch: "m/cmds/...",
+			match: map[string]bool{
+				"m/cmds/core/ls":     true,
+				"m/cmds/exp/ls":      true,
+				"m/cmds/core/man/ls": false,
+			},
+		},
+		{
+			name:      "a glob within an element widens at that element",
+			pattern:   "m/cmds/core/g*b",
+			wantFetch: "m/cmds/core/...",
+			match: map[string]bool{
+				"m/cmds/core/grub": true,
+				"m/cmds/core/ls":   false,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			p := parsePattern(tt.pattern)
+			if got := p.fetchPath(); got != tt.wantFetch {
+				t.Errorf("fetchPath() = %q, want %q", got, tt.wantFetch)
+			}
+			for pkg, want := range tt.match {
+				got, err := p.matches(pkg)
+				if err != nil {
+					t.Fatalf("matches(%q) error: %v", pkg, err)
+				}
+				if got != want {
+					t.Errorf("matches(%q) = %v, want %v", pkg, got, want)
+				}
+			}
+		})
+	}
+}
+
+// A version query rides along with the widened path, not the glob, because
+// the widened path is what `go get` is handed.
+func TestFetchSpecWidensTheGlob(t *testing.T) {
+	if got, want := parsePattern("m/cmds/core/*@main").fetchSpec(), "m/cmds/core/...@main"; got != want {
+		t.Errorf("fetchSpec() = %q, want %q", got, want)
+	}
+	if got, want := parsePattern("m/cmds/core/*").fetchSpec(), "m/cmds/core/..."; got != want {
+		t.Errorf("fetchSpec() = %q, want %q", got, want)
+	}
+}
+
+func TestCheckCollisions(t *testing.T) {
+	t.Run("distinct names are fine", func(t *testing.T) {
+		if err := checkCollisions([]string{"m/cmds/ls", "m/cmds/ip"}); err != nil {
+			t.Errorf("checkCollisions() = %v, want nil", err)
+		}
+	})
+
+	t.Run("a name claimed twice is reported with both paths", func(t *testing.T) {
+		err := checkCollisions([]string{"m/cmds/core/echo", "m/other/echo"})
+		if err == nil {
+			t.Fatal("checkCollisions() = nil, want an error")
+		}
+		for _, want := range []string{"echo", "m/cmds/core/echo", "m/other/echo"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("checkCollisions() = %q, want it to mention %q", err, want)
+			}
+		}
+	})
+
+	// Reporting only the first would make this a sequence of runs.
+	t.Run("every collision is reported, not just the first", func(t *testing.T) {
+		err := checkCollisions([]string{
+			"m/cmds/core/echo", "m/other/echo",
+			"m/cmds/core/man/gen", "m/cmds/exp/cbmem/gen",
+		})
+		if err == nil {
+			t.Fatal("checkCollisions() = nil, want an error")
+		}
+		if !strings.Contains(err.Error(), "echo") || !strings.Contains(err.Error(), "gen") {
+			t.Errorf("checkCollisions() = %q, want it to mention both echo and gen", err)
+		}
+		if !strings.Contains(err.Error(), "2 command names") {
+			t.Errorf("checkCollisions() = %q, want it to count both", err)
+		}
+	})
+
+	t.Run("the remedy is named", func(t *testing.T) {
+		err := checkCollisions([]string{"m/a/echo", "m/b/echo"})
+		if err == nil {
+			t.Fatal("checkCollisions() = nil, want an error")
+		}
+		if !strings.Contains(err.Error(), "-m/a/echo") {
+			t.Errorf("checkCollisions() = %q, want it to show an exclusion to copy", err)
+		}
+	})
+}
+
 func TestListCommands(t *testing.T) {
 	// Stands in for `go list`, so that the set arithmetic can be checked
 	// without a module on disk to ask about.
@@ -126,11 +260,11 @@ func TestListCommands(t *testing.T) {
 		"m/cmds/notacmd":  nil,
 		"m/cmds/explodes": nil,
 	}
-	list := func(path string) ([]string, error) {
-		if path == "m/cmds/explodes" {
+	list := func(p pattern) ([]string, error) {
+		if p.path == "m/cmds/explodes" {
 			return nil, errors.New("boom")
 		}
-		return matches[path], nil
+		return matches[p.path], nil
 	}
 
 	for _, tt := range []struct {
