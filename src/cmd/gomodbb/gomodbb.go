@@ -9,7 +9,12 @@
 //
 // It does that by writing a module whose only purpose is to require what the
 // patterns name, which is what turns a package pattern into the module that
-// provides it.
+// provides it. That module stands in for the checkout: it holds no source,
+// only the go.mod and go.sum recording what the patterns resolved to, which
+// is enough for the go command to list the packages and their versions.
+// Several projects named at once resolve into one build list, which is the
+// job a workspace would otherwise do. The source stays in the module cache,
+// and the busybox is generated into a separate directory.
 package main
 
 import (
