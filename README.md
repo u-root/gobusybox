@@ -105,6 +105,52 @@ Nothing there names a project `gomodbb` knows about. A pattern is handed to
 `go get`, which decides which module provides it, so any module the go command
 can fetch works.
 
+### Choosing which commands
+
+Two wildcards, meaning what they mean to `makebb`:
+
+| Pattern | Matches |
+| --- | --- |
+| `cmds/core/...` | every command below `cmds/core`, however deep |
+| `cmds/core/*` | commands one level below `cmds/core`, and no deeper |
+
+`...` is the go command's own wildcard and descends without limit, which picks
+up more than a busybox usually wants. In u-root, `cmds/...` matches 193
+packages, of which the four deepest are two `go:generate` helpers and two test
+fixtures, not commands anybody means to build:
+
+```
+cmds/core/man/gen
+cmds/exp/cbmem/gen
+cmds/exp/cmd2pkg/findpkg/test/goglob/echo
+cmds/exp/cmd2pkg/findpkg/test/goglob/foo
+```
+
+`*` stops at a path separator, so naming each level you want avoids them:
+
+```sh
+gomodbb -o bb \
+    github.com/u-root/u-root/cmds/core/*@main \
+    github.com/u-root/u-root/cmds/exp/*@main
+```
+
+The go command has no `*`, so a globbed pattern is fetched as the `...` that
+contains it and matched back down afterwards. Quote the pattern if your shell
+would otherwise expand it against the local directory.
+
+A busybox reaches each command by the base name of its directory, so two
+packages with the same base name cannot both be in one binary — the two `gen`
+helpers above collide even though their import paths differ. Leave one out by
+naming it with a leading `-`:
+
+```sh
+gomodbb github.com/u-root/u-root/cmds/...@main \
+    -github.com/u-root/u-root/cmds/exp/cbmem/gen
+```
+
+`-l` lists what a build would contain and reports these collisions without
+building, which is the cheap way to find them.
+
 ### No VCS will be used
 
 Packages and commands must be available in proxy.golang.org:

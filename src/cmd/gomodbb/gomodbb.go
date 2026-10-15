@@ -18,12 +18,15 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/dustin/go-humanize"
@@ -69,9 +72,46 @@ type pattern struct {
 // fetchSpec is the argument `go get` is given for this pattern.
 func (p pattern) fetchSpec() string {
 	if p.query == "" {
-		return p.path
+		return p.fetchPath()
 	}
-	return p.path + "@" + p.query
+	return p.fetchPath() + "@" + p.query
+}
+
+// couldBeGlob reports whether an element is a path.Match pattern rather than a
+// literal. It is findpkg's test, repeated so that gomodbb and the build agree
+// on which patterns are globs.
+func couldBeGlob(s string) bool {
+	return strings.ContainsAny(s, "*?[") || strings.Contains(s, `\\`)
+}
+
+// fetchPath returns the package pattern in a form the go command accepts.
+//
+// The go command knows "...", which descends, but not the "*" that matches a
+// single element. Widening a glob to the "..." that contains it asks for a
+// superset the go command can fetch and list, and matches narrow it back down.
+// findpkg widens the same way for the same reason, so a globbed pattern
+// selects the same packages here as it does during the build.
+func (p pattern) fetchPath() string {
+	elems := strings.Split(p.path, "/")
+	for i, e := range elems {
+		if couldBeGlob(e) {
+			// elems[:i:i] so that appending copies rather than
+			// overwriting the element the glob was found in.
+			return strings.Join(append(elems[:i:i], "..."), "/")
+		}
+	}
+	return p.path
+}
+
+// matches reports whether an import path is one this pattern selects.
+//
+// Only a widened pattern needs narrowing. Anything else was handed to the go
+// command as written, so whatever came back already matched it.
+func (p pattern) matches(pkgPath string) (bool, error) {
+	if !couldBeGlob(p.path) {
+		return true, nil
+	}
+	return path.Match(p.path, pkgPath)
 }
 
 // parsePattern splits a command-line argument into a package pattern and a
@@ -129,6 +169,44 @@ func goCmd(env *golang.Environ, gocmd string, args ...string) *exec.Cmd {
 		"GOVCS=*:off",
 	)
 	return cmd
+}
+
+// checkCollisions reports command names claimed by more than one package.
+//
+// A busybox reaches each command by the base name of its directory, so a name
+// claimed twice cannot be built whatever the import paths are. The build
+// refuses these too; finding them here costs a listing rather than a fetch and
+// a generated tree.
+func checkCollisions(cmds []string) error {
+	paths := map[string][]string{}
+	for _, c := range cmds {
+		name := path.Base(c)
+		paths[name] = append(paths[name], c)
+	}
+
+	var names []string
+	for name, p := range paths {
+		if len(p) > 1 {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "%d command name", len(names))
+	if len(names) > 1 {
+		b.WriteString("s")
+	}
+	b.WriteString(" claimed by more than one package, which will not build")
+	for _, name := range names {
+		fmt.Fprintf(&b, "\n\t%s: %s", name, strings.Join(paths[name], ", "))
+	}
+	b.WriteString("\n\nName the ones to leave out as exclusions, e.g. -")
+	b.WriteString(paths[names[0]][0])
+	return errors.New(b.String())
 }
 
 // moduleDir returns the directory to write the fetching module into, and
@@ -203,7 +281,7 @@ func fetch(l *log.Logger, env *golang.Environ, modDir string, patterns []pattern
 // listCommands takes it as a parameter so that which commands a pattern covers
 // and which of them survive the exclusions stay separable: the first needs a
 // module on disk to ask about, the second is arithmetic.
-type commandLister func(path string) ([]string, error)
+type commandLister func(p pattern) ([]string, error)
 
 // listCommands returns the import paths the patterns match that are commands.
 //
@@ -219,7 +297,7 @@ func listCommands(patterns []pattern, list commandLister) ([]string, error) {
 	excluded := map[string]bool{}
 	var include []string
 	for _, p := range patterns {
-		paths, err := list(p.path)
+		paths, err := list(p)
 		if err != nil {
 			return nil, err
 		}
@@ -249,15 +327,22 @@ func listCommands(patterns []pattern, list commandLister) ([]string, error) {
 // -e keeps a pattern that matches some unbuildable package from failing the
 // whole listing, matching makebb, which skips what it cannot build rather than
 // refusing to build anything.
-func mainPackages(env *golang.Environ, path string) ([]string, error) {
-	cmd := goCmd(env, "list", "-e", "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, path)
+func mainPackages(env *golang.Environ, p pattern) ([]string, error) {
+	cmd := goCmd(env, "list", "-e", "-f", `{{if eq .Name "main"}}{{.ImportPath}}{{end}}`, p.fetchPath())
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("`go list %s`: %w", path, err)
+		return nil, fmt.Errorf("`go list %s`: %w", p.fetchPath(), err)
 	}
 	var paths []string
 	for line := range strings.SplitSeq(string(out), "\n") {
-		if line = strings.TrimSpace(line); line != "" {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch ok, err := p.matches(line); {
+		case err != nil:
+			return nil, fmt.Errorf("matching %q against %q: %w", p.path, line, err)
+		case ok:
 			paths = append(paths, line)
 		}
 	}
@@ -326,14 +411,22 @@ func main() {
 	}
 
 	if *list {
-		cmds, err := listCommands(patterns, func(path string) ([]string, error) {
-			return mainPackages(env, path)
+		cmds, err := listCommands(patterns, func(p pattern) ([]string, error) {
+			return mainPackages(env, p)
 		})
 		if err != nil {
 			l.Fatalf("Listing commands failed: %v", err)
 		}
 		for _, c := range cmds {
 			fmt.Println(c)
+		}
+		// The list is what a build with these arguments would contain,
+		// so a collision that would stop that build has to stop here
+		// too. The list is printed first: it is the answer that was
+		// asked for, and it is what the exclusions have to be chosen
+		// from.
+		if err := checkCollisions(cmds); err != nil {
+			l.Fatal(err)
 		}
 		return
 	}
