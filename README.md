@@ -1,7 +1,7 @@
 # Go Busybox
 
 [![PkgGoDev](https://pkg.go.dev/badge/github.com/u-root/gobusybox/src)](https://pkg.go.dev/github.com/u-root/gobusybox/src)
-[![Build Status](https://circleci.com/gh/u-root/gobusybox.svg?style=svg)](https://circleci.com/gh/u-root/gobusybox/tree/main)
+[![Build Status](https://github.com/u-root/gobusybox/actions/workflows/go.yml/badge.svg)](https://github.com/u-root/gobusybox/actions/workflows/go.yml)
 [![Slack](https://slack.osfw.dev/badge.svg)](https://slack.osfw.dev)
 
 **Contact**: best bet to reach us is the
@@ -15,8 +15,9 @@ determine which command is being called.
 
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
-| Go version | Tested are 1.20-1.22                                  |
+| Go version | 1.25 and later (see src/go.mod)                       |
 | Packaging  | Go workspaces, Go modules, Go vendoring               |
+| Source     | A checkout, or the module proxy (see `gomodbb`)       |
 | `GOOS`     | any (linux is tested)                                 |
 | `GOARCH`   | any (amd64, arm, arm64, riscv64 are tested)           |
 | CGO        | *Not supported*                                       |
@@ -26,7 +27,7 @@ An example:
 ```bash
 go install github.com/u-root/gobusybox/src/cmd/makebb@latest
 
-git clone github.com/u-root/u-root
+git clone https://github.com/u-root/u-root
 cd u-root
 makebb ./cmds/core/dmesg ./cmds/core/strace
 ```
@@ -75,6 +76,137 @@ makebb ./cpu/cmds/* ./p9/cmd/*
 >
 > For multi-module compilation, use Go workspaces or read below.
 
+## gomodbb: building without a checkout
+
+`makebb` builds commands that are already on disk, so every input has to be
+cloned first, and commands from several projects have to be arranged into a Go
+workspace before any of them can be named.
+
+`gomodbb` skips both steps. The go command already knows how to fetch a module
+and hand back its source, so `gomodbb` asks it to, and builds from the copy in
+the module cache:
+
+```sh
+go install github.com/u-root/gobusybox/src/cmd/gomodbb@latest
+
+gomodbb github.com/u-root/u-root/cmds/core/...@main
+```
+
+No `git clone`, and no `go work init` even across projects:
+
+```sh
+gomodbb -o bb \
+    github.com/u-root/u-root/cmds/core/...@main \
+    github.com/u-root/cpu/cmds/...@main \
+    github.com/hugelgupf/p9/cmd/...@latest
+```
+
+Nothing there names a project `gomodbb` knows about. A pattern is handed to
+`go get`, which decides which module provides it, so any module the go command
+can fetch works.
+
+### Choosing which commands
+
+Two wildcards, meaning what they mean to `makebb`:
+
+| Pattern | Matches |
+| --- | --- |
+| `cmds/core/...` | every command below `cmds/core`, however deep |
+| `cmds/core/*` | commands one level below `cmds/core`, and no deeper |
+
+`...` is the go command's own wildcard and descends without limit, which picks
+up more than a busybox usually wants. In u-root, `cmds/...` matches 193
+packages, of which the four deepest are two `go:generate` helpers and two test
+fixtures, not commands anybody means to build:
+
+```
+cmds/core/man/gen
+cmds/exp/cbmem/gen
+cmds/exp/cmd2pkg/findpkg/test/goglob/echo
+cmds/exp/cmd2pkg/findpkg/test/goglob/foo
+```
+
+`*` stops at a path separator, so naming each level you want avoids them:
+
+```sh
+gomodbb -o bb \
+    github.com/u-root/u-root/cmds/core/*@main \
+    github.com/u-root/u-root/cmds/exp/*@main
+```
+
+The go command has no `*`, so a globbed pattern is fetched as the `...` that
+contains it and matched back down afterwards. Quote the pattern if your shell
+would otherwise expand it against the local directory.
+
+A busybox reaches each command by the base name of its directory, so two
+packages with the same base name cannot both be in one binary — the two `gen`
+helpers above collide even though their import paths differ. Leave one out by
+naming it with a leading `-`:
+
+```sh
+gomodbb github.com/u-root/u-root/cmds/...@main \
+    -github.com/u-root/u-root/cmds/exp/cbmem/gen
+```
+
+`-l` lists what a build would contain and reports these collisions without
+building, which is the cheap way to find them.
+
+### No VCS will be used
+
+Packages and commands must be available in proxy.golang.org:
+gomodbb sets GOPROXY to `https://proxy.golang.org` not `https://proxy.golang.org,direct`
+as the standard go command sets it, so there is no fallback to git or some
+other VCS. Pinning GOPROXY is not enough on its own, because `GOPRIVATE` and
+`GONOPROXY` name paths that bypass the proxy and are fetched with git, so
+gomodbb clears both and sets `GOVCS=*:off`, which turns any remaining attempt
+to use a VCS into an error that says so. This is helpful on systems like
+Plan 9, which do not support the standard git command.
+
+### Choosing a version
+
+Everything after the last `@` is a version query, and it means what it means to
+`go get`:
+
+| Query | Selects |
+| --- | --- |
+| *(omitted)* | The highest release tag, as `go get` would |
+| `@main` | The tip of that branch |
+| `@v0.16.0` | That tag |
+| `@98a84dad0e9c` | That revision |
+
+> [!CAUTION]
+> `@HEAD` is not the tip of the default branch. It is a version query like any
+> other, and resolves through the proxy to whatever it last recorded under that
+> name, which can be months old. Use `@main`, or whatever the branch is called.
+
+Omitting the query is the reproducible choice and the surprising one: for a
+project that tags rarely, the newest release can be far behind the branch
+`git clone` would have given you.
+
+### Listing what a pattern covers
+
+`-l` prints the commands a pattern matches and builds nothing. It applies
+exclusions, so the list is exactly what a build with the same arguments would
+contain, and it prints to stdout with everything else on stderr:
+
+```sh
+gomodbb -l github.com/u-root/u-root/cmds/core/...@main | wc -l
+```
+
+### Pinning
+
+`-mod-dir` keeps the module `gomodbb` writes to do the fetching, whose `go.mod`
+records the version every pattern resolved to:
+
+```sh
+gomodbb -mod-dir ./pins github.com/u-root/u-root/cmds/core/...@main
+grep 'u-root/u-root ' ./pins/go.mod
+#	github.com/u-root/u-root v0.16.1-0.20261010115301-98a84dad0e9c // indirect
+```
+
+Pass that directory again to build from the same versions. `gomodbb` reuses an
+existing `go.mod` rather than overwriting it.
+
 ## Path resolution & multi-module builds
 
 `makebb` and the APIs mentioned below all accept commands from file system
@@ -115,7 +247,7 @@ go work use ./cpu
 
 makebb \
     ./u-root/cmds/core/init \
-    ./u-root/cmds/core/elvish \
+    ./u-root/cmds/core/gosh \
     ./cpu/cmds/cpud
 
 # Also works for offline builds with `go work vendor` (Go 1.22 feature):
@@ -123,7 +255,7 @@ go work vendor
 
 makebb \
     ./u-root/cmds/core/init \
-    ./u-root/cmds/core/elvish \
+    ./u-root/cmds/core/gosh \
     ./cpu/cmds/cpud
 ```
 
@@ -135,12 +267,12 @@ and checked for existence.
 ```shell
 GBB_PATH=$(pwd)/u-root:$(pwd)/cpu makebb \
     cmds/core/init \
-    cmds/core/elvish \
+    cmds/core/gosh \
     cmds/cpud
 
 # matches:
 #   $(pwd)/u-root/cmds/core/init
-#   $(pwd)/u-root/cmds/core/elvish
+#   $(pwd)/u-root/cmds/core/gosh
 #   $(pwd)/cpu/cmds/cpud
 ```
 
@@ -200,7 +332,7 @@ package something
 import (
         _ "github.com/u-root/u-root/cmds/core/ip"
         _ "github.com/u-root/u-root/cmds/core/init"
-        _ "github.com/hugelgupf/p9/cmd/p9ufs"
+        _ "github.com/u-root/cpu/cmds/cpud"
 )
 ```
 
@@ -211,7 +343,7 @@ go install github.com/u-root/gobusybox/src/cmd/gencmddeps@latest
 
 gencmddeps -o deps.go -t tools -p something \
     github.com/u-root/u-root/cmds/core/{ip,init} \
-    github.com/hugelgupf/p9/cmd/p9ufs
+    github.com/u-root/cpu/cmds/cpud
 ```
 
 > [!IMPORTANT]
@@ -229,7 +361,7 @@ go mod tidy
 makebb \
   github.com/u-root/u-root/cmds/core/ip \
   github.com/u-root/u-root/cmds/core/init \
-  github.com/hugelgupf/p9/cmd/p9ufs
+  github.com/u-root/cpu/cmds/cpud
 
 # Also works with vendored, offline builds:
 go mod vendor
@@ -237,7 +369,7 @@ go mod vendor
 makebb \
   github.com/u-root/u-root/cmds/core/ip \
   github.com/u-root/u-root/cmds/core/init \
-  github.com/hugelgupf/p9/cmd/p9ufs
+  github.com/u-root/cpu/cmds/cpud
 ```
 
 ## APIs
@@ -300,9 +432,11 @@ ln -s bb strace
 ### Command Transformation
 
 Principally, the AST transformation moves all global side-effects into callable
-package functions. E.g. `main` becomes `registeredMain`, each `init` becomes
-`initN`, and global variable assignments are moved into their own `initN`. A
-`registeredInit` calls each `initN` function in the correct init order.
+package functions. E.g. `main` becomes `registeredMain`, each `init` becomes a
+numbered `busyboxInitN`, and each global variable assignment is moved into its
+own `busyboxInitN`. `busyboxInit0` calls the variable initializers in the order
+`go/types` computed, and a `registeredInit` calls `busyboxInit0` followed by
+the bodies of the original `init` functions.
 
 Then, these `registeredMain` and `registeredInit` functions can be registered
 with a global map of commands by name and used when called upon.
@@ -332,34 +466,38 @@ func main() {
 This would be rewritten to be:
 
 ```go
-package sl // based on the directory name
+package bbsl // "bb" + the command name
 
 import (
   "flag"
   "log"
 
-  "../bb/pkg/bbmain" // generated import path
+  bbmain "bb.u-root.com/bb/pkg/bbmain" // generated import path
 )
 
 // Type has to be inferred through type checking.
 var name *string
 
-func init0() {
+func busyboxInit2() {
   log.Printf("init %s", *name)
-}
-
-func init1() {
-  name = flag.String("name", "", "Gimme name")
-}
-
-func registeredInit() {
-  // Order is determined by go/types.Info.InitOrder.
-  init1()
-  init0()
 }
 
 func registeredMain() {
   log.Printf("train")
+}
+
+func busyboxInit1() {
+  name = flag.String("name", "", "Gimme name")
+}
+
+func busyboxInit0() {
+  // Order is determined by go/types.Info.InitOrder.
+  busyboxInit1()
+}
+
+func registeredInit() {
+  busyboxInit0()
+  busyboxInit2()
 }
 
 func init() {
@@ -383,7 +521,7 @@ import (
   // Side-effect import so init in sl calls bbmain.Register
   _ "github.com/org/repo/cmds/sl"
 
-  "../bb/pkg/bbmain"
+  "bb.u-root.com/bb/pkg/bbmain"
 )
 
 func main() {
@@ -396,48 +534,69 @@ func main() {
 All files are written into a temporary directory. All dependency Go packages are
 also written there.
 
-The directory structure we generate resembles a $GOPATH-based source tree, even
-if we are combining module-based Go commands. Regardless of whether the original
-commands are based on Go modules, Go workspaces, or GOPATH, we generate the same
-structure and compiled with `GOPATH=$tmpdir GO111MODULE=off`.
+The generated tree is a single, self-contained Go module named
+`bb.u-root.com/bb`. The generated `main.go` sits at the module root, and every
+rewritten command and every non-standard-library dependency is written into
+`vendor/` at its original import path, so that the rewritten sources compile
+without any of their import statements being touched.
 
-This means that in all cases, traditionally offline compilations remain offline
-(e.g. GOPATH, or vendored modules / workspaces).
+Whether the original commands come from a single Go module or several joined by
+a Go workspace, we generate the same structure and compile it with `GOWORK=off
+go build -mod=vendor`. Because everything is vendored, `-mod=vendor` consults
+neither the network nor the module cache, so in all cases traditionally offline
+compilations remain offline.
+
+Every command must live in a Go module. GOPATH mode (`GO111MODULE=off`) is not
+supported: it is the only mode in which one import path can exist at two
+versions at once, each reached through a different nested `vendor/` directory,
+and a module vendor directory is flat and can hold only one of them. See
+[docs/adr/0002-gopath-mode-is-not-supported.md](docs/adr/0002-gopath-mode-is-not-supported.md).
+If your commands span several modules, use `goanywhere` to put them in a
+workspace.
+
+`go.mod` and `vendor/modules.txt` are generated together from the same package
+list; the go tool rejects a vendor directory whose `modules.txt` disagrees with
+`go.mod`. A main module has no version of its own, so its packages are recorded
+at a synthetic version that `-mod=vendor` never resolves.
 
 ```
 /tmp/bb-$NUM/
-└── src
-    ├── bb.u-root.com
-    │   └── bb
-    │       ├── main.go               << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
-    │       └── pkg
-    │           └── bbmain
-    │               └── register.go   << ./src/pkg/bb/bbmain/register.go
-    └── github.com
-        └── u-root
-            ├── uio
-            │   ├── uio               << dependency used by both
-            │   └── ulog              << dependency used by both
-            ├── u-bmc
-            │   ├── cmd
-            │   │   ├── fan           << generated command package
-            │   │   ├── login         << generated command package
-            │   │   └── socreset      << generated command package
-            │   └── pkg
-            │       ├── acme          << dependency copied from u-bmc
-            │       ├── aspeed        << dependency copied from u-bmc
-            │       ├── gpiowatcher   << dependency copied from u-bmc
-            │       └── mtd           << dependency copied from u-bmc
-            └── u-root
-                ├── cmds
-                │   └── core
-                │       ├── cat       << generated command package
-                │       ├── ip        << generated command package
-                │       └── ls        << generated command package
-                └── pkg
-                    ├── curl          << dependency copied from u-root
-                    ├── dhclient      << dependency copied from u-root
-                    ├── ip            << dependency copied from u-root
-                    ├── ls            << dependency copied from u-root
-                    └── uio           << dependency copied from u-root
+├── go.mod                           << module bb.u-root.com/bb
+├── main.go                          << ./src/pkg/bb/bbmain/cmd/main.go (with edits)
+├── pkg
+│   └── bbmain
+│       └── register.go              << ./src/pkg/bb/bbmain/register.go
+└── vendor
+    ├── modules.txt                  << generated manifest
+    ├── github.com
+    │   └── u-root
+    │       ├── uio
+    │       │   ├── uio              << dependency used by both
+    │       │   └── ulog             << dependency used by both
+    │       ├── u-bmc
+    │       │   ├── cmd
+    │       │   │   ├── fan          << generated command package
+    │       │   │   ├── login        << generated command package
+    │       │   │   └── socreset     << generated command package
+    │       │   └── pkg
+    │       │       ├── acme         << dependency copied from u-bmc
+    │       │       ├── aspeed       << dependency copied from u-bmc
+    │       │       ├── gpiowatcher  << dependency copied from u-bmc
+    │       │       └── mtd          << dependency copied from u-bmc
+    │       └── u-root
+    │           ├── cmds
+    │           │   └── core
+    │           │       ├── cat      << generated command package
+    │           │       ├── ip       << generated command package
+    │           │       └── ls       << generated command package
+    │           └── pkg
+    │               ├── curl         << dependency copied from u-root
+    │               ├── dhclient     << dependency copied from u-root
+    │               ├── ip           << dependency copied from u-root
+    │               ├── ls           << dependency copied from u-root
+    │               └── uio          << dependency copied from u-root
+    └── golang.org
+        └── x
+            └── sys
+                └── unix             << dependency copied from golang.org/x/sys
 ```

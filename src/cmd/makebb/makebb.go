@@ -76,7 +76,7 @@ func main() {
 		// Only remove temp dir if there was no error.
 		remove = false
 	} else if opts.GenerateOnly {
-		l.Printf("Generated source can be found in %s. `cd %s && go build` to build.", tmpDir, filepath.Join(tmpDir, "src/bb.u-root.com/bb"))
+		l.Printf("Generated source can be found in %s. `cd %s && GOWORK=off go build -mod=vendor` to build.", tmpDir, tmpDir)
 	}
 	if remove && !opts.GenerateOnly && !*keep {
 		os.RemoveAll(tmpDir)

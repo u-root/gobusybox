@@ -1,0 +1,16 @@
+// nestedmod is a module inside this one's directory tree, so its packages are
+// not part of this module and `makebb ./nestedmod/cmd/p9ufs` cannot reach them
+// on its own. A workspace is what makes building commands from both at once
+// possible, now that makebb requires Go modules and has no GOPATH mode to fall
+// back on. The nested-modules case in ../all_test.go depends on this file.
+//
+// 1.18 is the first release with workspaces, and both members declare go 1.13,
+// so nothing here needs a newer one. Keep it that low: this directive is a
+// floor on every toolchain CI tests, and `go work init` would write whichever
+// version happened to run it.
+go 1.18
+
+use (
+	.
+	./nestedmod
+)
