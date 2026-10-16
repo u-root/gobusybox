@@ -84,9 +84,6 @@ jobs:
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
-      - name: Allow toolchain selection
-        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
-
       - name: gofmt
         run: cd src && test -z "$(gofmt -s -l $(find -name '*.go'))"
 
@@ -116,9 +113,6 @@ jobs:
         with:
           go-version: ${{ matrix.goversion }}
           cache-dependency-path: src/go.sum
-
-      - name: Allow toolchain selection
-        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
@@ -158,9 +152,6 @@ jobs:
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
-      - name: Allow toolchain selection
-        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
-
       - name: Test
         run: |
           mkdir cover
@@ -192,9 +183,6 @@ jobs:
           # so this job would save an emptied cache under a key the other jobs
           # share. Opt out rather than poison it.
           cache: false
-
-      - name: Allow toolchain selection
-        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
