@@ -15,7 +15,7 @@ determine which command is being called.
 
 | Feature    | Support status                                        |
 | ---------- | ----------------------------------------------------- |
-| Go version | 1.25 and later (see src/go.mod)                       |
+| Go version | 1.26 and later (see src/go.mod)                       |
 | Packaging  | Go workspaces, Go modules, Go vendoring               |
 | Source     | A checkout, or the module proxy (see `gomodbb`)       |
 | `GOOS`     | any (linux is tested)                                 |

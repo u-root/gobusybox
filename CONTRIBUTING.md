@@ -30,7 +30,7 @@ cd src
 go test ./...
 ```
 
-CI runs on Go 1.25.x and 1.26.x; `src/go.mod` declares `go 1.25.0`. CI also
+CI runs on Go 1.26.x and 1.27.x; `src/go.mod` declares `go 1.26.0`. CI also
 runs the two integration scripts, which live at the repository root and are
 invoked from there, not from `src/`:
 

@@ -33,9 +33,21 @@ concurrency:
 # inventing a new one.
 #
 # The pins in test-external-workspaces.sh are old enough not to trip this
-# today, but u-root's main branch already declares go 1.26.6, so once those
-# pins move, the older matrix entry would fail with an error naming
-# GOTOOLCHAIN rather than anything about makebb.
+# today -- the u-root rev pinned there declares go 1.19 -- but u-root's main
+# branch already declares go 1.26.6. Once those pins move past the matrix
+# entry below, the job would fail with an error naming GOTOOLCHAIN rather
+# than anything about makebb.
+#
+# The matrix lists only the Go versions src/go.mod actually supports. An entry
+# below the `go` directive either fails outright or silently downloads a newer
+# toolchain and tests that instead, which is what 1.20, 1.21 and 1.22 did
+# before 515829d. src/go.mod declares go 1.26.0, so the list runs from 1.26.x
+# up to the current release. Add each release as it ships; remove an entry only
+# when the directive itself moves past it.
+#
+# Tidy is pinned to the floor rather than matrixed. It asserts that go.mod and
+# go.sum are tidy, which is a property of the go directive, so running it once
+# per matrix entry would assert the same thing twice.
 #
 # Written to $GITHUB_ENV rather than an `env:` block because setup-go exports
 # its value that way too, and the last write to $GITHUB_ENV wins. The
@@ -66,7 +78,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.25.x'
+          go-version: '1.26.x'
           cache-dependency-path: src/go.sum
 
       - name: Allow toolchain selection
@@ -95,7 +107,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.25.x', '1.26.x']
+        goversion: ['1.26.x', '1.27.x']
     steps:
       - uses: actions/checkout@v7
 
@@ -129,7 +141,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.25.x', '1.26.x']
+        goversion: ['1.26.x', '1.27.x']
     steps:
       - uses: actions/checkout@v7
 
@@ -168,7 +180,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.25.x', '1.26.x']
+        goversion: ['1.26.x', '1.27.x']
     steps:
       - uses: actions/checkout@v7
 
