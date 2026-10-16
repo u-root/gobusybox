@@ -99,6 +99,55 @@ jobs:
             exit 1
           fi
 
+  lint:
+    name: Lint
+    runs-on: ubuntu-26.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          # Matched to the floor rather than matrixed, for the same reason
+          # Tidy is: what the linters report is a property of the source, not
+          # of the toolchain compiling it.
+          go-version: '1.26.x'
+          cache-dependency-path: src/go.sum
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9.3.0
+        with:
+          # Pinned rather than `latest`. The configuration this repository
+          # first proposed used `latest`, and when golangci-lint v2 shipped it
+          # began rejecting that v1 config outright with "unsupported version
+          # of the configuration". A pin turns that kind of upstream break
+          # into a deliberate version bump instead of a surprise one morning.
+          version: v2.15.0
+          # src/ is the module; the repository root is not one. The config
+          # lives at src/.golangci.yml.
+          working-directory: src
+          # Report findings without failing the job. The tree has a backlog
+          # this job did not introduce (see issue #154), so gating on it
+          # would mark every pull request red for faults belonging to nobody
+          # in particular, and the signal would be ignored within a week.
+          # The findings still appear, as annotations on the diff and in the
+          # log.
+          #
+          # This is the flag that does it, not continue-on-error. That only
+          # stops a failed job from failing the *workflow*: the job itself,
+          # and so the check shown on the pull request, still goes red. It
+          # was tried first and did exactly that.
+          #
+          # Leaving the exit code to golangci-lint also keeps the two
+          # outcomes apart. Findings are expected and green; a job that could
+          # not download or run the linter at all is red, which is what you
+          # want to hear about.
+          #
+          # Drop this argument to make lint gate merges, once #154 is empty.
+          args: --issues-exit-code=0
+
   unit-test:
     name: Unit Test
     runs-on: ubuntu-26.04
