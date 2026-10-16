@@ -106,19 +106,19 @@ type Package struct {
 	// mainFuncName is the name for the renamed main().
 	mainFuncName string
 
-	// init is the cmd.Init function that calls all other InitXs in the
-	// right order.
+	// init is the registeredInit function that calls busyboxInit0 and the
+	// renamed bodies of the original init functions, in the right order.
 	init *ast.FuncDecl
 
-	// initAssigns is a map of assignment expression -> InitN function call
-	// statement.
+	// initAssigns is a map of assignment expression -> busyboxInitN function
+	// call statement.
 	//
-	// That InitN should contain the assignment statement for the
+	// That busyboxInitN should contain the assignment statement for the
 	// appropriate assignment expression.
 	//
 	// types.Info.InitOrder keeps track of Initializations by Lhs name and
-	// Rhs ast.Expr.  We reparent the Rhs in assignment statements in InitN
-	// functions, so we use the Rhs as an easy key here.
+	// Rhs ast.Expr.  We reparent the Rhs in assignment statements in
+	// busyboxInitN functions, so we use the Rhs as an easy key here.
 	// types.Info.InitOrder + initAssigns can then easily be used to derive
 	// the order of Stmts in the "real" init.
 	//
@@ -137,7 +137,7 @@ func NewPackage(name string, p *packages.Package) *Package {
 
 	pp.mainFuncName = pp.newFunctionName("registeredMain")
 
-	// This Init will hold calls to all other InitXs.
+	// This will hold calls to busyboxInit0 and to each renamed original init.
 	pp.init = &ast.FuncDecl{
 		Name: ast.NewIdent(pp.newFunctionName("registeredInit")),
 		Type: &ast.FuncType{
@@ -475,7 +475,7 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 func (p *Package) Rewrite(destDir, bbImportPath string) error {
 	// This init holds all variable initializations.
 	//
-	// func init0() {}
+	// func busyboxInit0() {}
 	varInit := &ast.FuncDecl{
 		Name: p.nextInit(true),
 		Type: &ast.FuncType{
