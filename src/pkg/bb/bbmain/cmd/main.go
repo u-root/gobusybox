@@ -63,10 +63,13 @@ func IsTargetSymlink(originalFile, target string) bool {
 //
 // ResolveUntilLastSymlink(/foo/bar) returns /baz/foo.
 func ResolveUntilLastSymlink(p string) string {
-	for target, err := os.Readlink(p); err == nil && IsTargetSymlink(p, target); target, err = os.Readlink(p) {
+	for {
+		target, err := os.Readlink(p)
+		if err != nil || !IsTargetSymlink(p, target) {
+			return p
+		}
 		p = AbsSymlink(p, target)
 	}
-	return p
 }
 
 func run() {
