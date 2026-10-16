@@ -1,0 +1,105 @@
+# golangci-lint configuration for the src/ module.
+#
+# Run it from src/, like every other `go` command here:
+#
+#   cd src && golangci-lint run ./...
+#
+# This file sits beside src/go.mod rather than at the repository root because
+# the root is not a module. Keeping it here means the paths below are relative
+# to the module being linted.
+#
+# The version key selects the v2 configuration schema. A v1 file -- `linters:
+# enable:` with a sibling `linters-settings:` and `issues:` -- is rejected
+# outright by v2 with "unsupported version of the configuration", so this is
+# not a file that can be half-migrated. Pin the golangci-lint release wherever
+# this is run automatically: a floating `latest` silently became v2 when that
+# shipped, which is exactly the breakage pinning exists to prevent.
+version: "2"
+
+# golangci-lint caps what it prints by default: 50 issues per linter, and 3
+# per distinct message. Eight unchecked os.RemoveAll calls therefore surface
+# as three, and *which* three moves between runs, so a capped report reads as
+# though the linters were nondeterministic. Uncap both: a report that hides
+# findings is worse than no report, because it looks clean.
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  # The v2 defaults -- errcheck, govet, ineffassign, staticcheck, unused --
+  # remain on; `enable` adds to them rather than replacing them.
+  enable:
+    - containedctx
+    - gocritic
+    - godot
+    - nilerr
+    - revive
+    - unconvert
+
+  settings:
+    gocritic:
+      disabled-checks:
+        # An if/else chain over unrelated conditions is clearer than a switch
+        # that has to repeat `true`, and this tree has several.
+        - ifElseChain
+
+    govet:
+      disable:
+        # The inline analyzer reports the places where the inliner declined to
+        # act, such as "cannot inline: type parameter inference is not yet
+        # supported" for the slices.Index call in cmd/goanywhere. That
+        # describes a limitation of the analyzer, not a defect in the code,
+        # and nothing written here can clear it. `go vet` does not run this
+        # analyzer by default; golangci-lint does.
+        - inline
+
+    revive:
+      severity: error
+      # Below this, revive keeps the finding to itself.
+      confidence: 0.8
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+          arguments:
+            - allowTypesBefore: "*testing.T"
+        - name: context-keys-type
+        - name: dot-imports
+        - name: early-return
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: exported
+          arguments:
+            - "checkPrivateReceivers"
+            - "sayRepetitiveInsteadOfStutters"
+        - name: file-header
+          # The year range is 20[0-9][0-9] rather than the 20[1-2][0-9] this
+          # rule was first proposed with, which would have begun rejecting
+          # every new file in 2030.
+          #
+          # A file missing both a header and a package comment trips this rule
+          # and package-comments at the same line and column, and golangci-lint
+          # keeps only one finding per position -- so the rule named for
+          # pkg/uflag/uflag.go alternates between runs. The total does not
+          # change, and fixing either violation is no less necessary.
+          arguments:
+            - "Copyright 20[0-9][0-9](-20[0-9][0-9])? the u-root Authors. All rights reserved Use of this source code is governed by a BSD-style license that can be found in the LICENSE file."
+        - name: if-return
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+        - name: var-naming
+
+  exclusions:
+    paths:
+      # Inputs to the rewrite rather than code this project ships. They are
+      # deliberately malformed -- no package comment, no copyright header,
+      # unusual declarations -- because exercising findpkg against odd source
+      # is the whole reason they exist.
+      - pkg/bb/findpkg/test
