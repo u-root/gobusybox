@@ -64,6 +64,12 @@ func TestMakeBB(t *testing.T) {
 			want:     map[string]string{"12-fancy-cmd": "12-fancy-cmd\n"},
 		},
 		{
+			testname: "globalvar",
+			cmds:     []string{"."},
+			wd:       filepath.Join(wd, "globalvar"),
+			want:     map[string]string{"globalvar": "foo bar baz fob 1 one qux 7 42 true 7 10 20 30 10 20 11 21\n"},
+		},
+		{
 			testname:  "injectldvar",
 			cmds:      []string{"."},
 			wd:        filepath.Join(wd, "injectldvar"),
