@@ -6,6 +6,7 @@ package bb
 
 import (
 	"errors"
+	"path"
 	"strings"
 	"testing"
 
@@ -108,4 +109,76 @@ func TestCheckModulesErrorIsActionable(t *testing.T) {
 			t.Errorf("checkModules() = %q, want it to mention %q", err, want)
 		}
 	}
+}
+
+// namedCmd is a command as checkDuplicate sees it: an import path, and the
+// base name the busybox would reach it by.
+func namedCmd(pkgPath string) *bbinternal.Package {
+	return &bbinternal.Package{
+		Name: path.Base(pkgPath),
+		Pkg:  &packages.Package{PkgPath: pkgPath},
+	}
+}
+
+func TestCheckDuplicate(t *testing.T) {
+	t.Run("distinct names are fine", func(t *testing.T) {
+		err := checkDuplicate([]*bbinternal.Package{
+			namedCmd("m/cmds/ls"),
+			namedCmd("m/cmds/ip"),
+		})
+		if err != nil {
+			t.Errorf("checkDuplicate() = %v, want nil", err)
+		}
+	})
+
+	t.Run("a name claimed twice is reported with both paths", func(t *testing.T) {
+		err := checkDuplicate([]*bbinternal.Package{
+			namedCmd("m/cmds/core/echo"),
+			namedCmd("m/other/echo"),
+		})
+		if err == nil {
+			t.Fatal("checkDuplicate() = nil, want an error")
+		}
+		for _, want := range []string{"echo", "m/cmds/core/echo", "m/other/echo"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("checkDuplicate() = %q, want it to mention %q", err, want)
+			}
+		}
+	})
+
+	// Returning on the first collision makes fixing a pattern that matched
+	// hundreds of packages a sequence of rebuilds, each paying for a full
+	// load to reveal the next one.
+	t.Run("every collision is reported, not just the first", func(t *testing.T) {
+		err := checkDuplicate([]*bbinternal.Package{
+			namedCmd("m/cmds/core/echo"),
+			namedCmd("m/other/echo"),
+			namedCmd("m/cmds/core/man/gen"),
+			namedCmd("m/cmds/exp/cbmem/gen"),
+		})
+		if err == nil {
+			t.Fatal("checkDuplicate() = nil, want an error")
+		}
+		if !strings.Contains(err.Error(), "2 duplicate command names") {
+			t.Errorf("checkDuplicate() = %q, want it to count both", err)
+		}
+		for _, want := range []string{"m/cmds/core/man/gen", "m/cmds/exp/cbmem/gen"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("checkDuplicate() = %q, want it to mention %q", err, want)
+			}
+		}
+	})
+
+	t.Run("the remedy is named", func(t *testing.T) {
+		err := checkDuplicate([]*bbinternal.Package{
+			namedCmd("m/a/echo"),
+			namedCmd("m/b/echo"),
+		})
+		if err == nil {
+			t.Fatal("checkDuplicate() = nil, want an error")
+		}
+		if !strings.Contains(err.Error(), "-m/a/echo") {
+			t.Errorf("checkDuplicate() = %q, want it to show an exclusion to copy", err)
+		}
+	})
 }

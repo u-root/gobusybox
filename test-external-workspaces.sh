@@ -15,10 +15,19 @@ pushd src/cmd/goanywhere
 $GO build -covermode=atomic
 popd
 
+pushd src/cmd/gomodbb
+$GO build -covermode=atomic
+popd
+
 MAKEBB=$(pwd)/src/cmd/makebb/makebb
 GOANYWHERE=$(pwd)/src/cmd/goanywhere/goanywhere
+GOMODBB=$(pwd)/src/cmd/gomodbb/gomodbb
 TMPDIR=$(mktemp -d)
 EMPTY_TMPDIR=$(mktemp -d)
+
+# The revision gomodbb fetches below, so that it and the clone cannot drift
+# apart and start testing two different trees.
+UROOT_REV=6ca118b0a77c23ae859cddeee15762d9cd74c63f
 
 pushd $TMPDIR
 
@@ -33,7 +42,7 @@ trap ctrl_c INT
 
 # u-root checked out NOT in $GOPATH.
 # Checkout before 1.20+ was required.
-(git clone https://github.com/u-root/u-root && cd u-root && git checkout 6ca118b0a77c23ae859cddeee15762d9cd74c63f)
+(git clone https://github.com/u-root/u-root && cd u-root && git checkout $UROOT_REV)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
 (git clone https://github.com/gokrazy/gokrazy && cd gokrazy && git checkout 254af2bf3c82ff9f56e89794b2c146ef9cc85dc6)
 # Pin to commit before Go 1.20 was required. (We test 1.18+.)
@@ -68,6 +77,31 @@ rm go.work go.work.sum
 $GOANYWHERE -d ./u-root/cmds/*/* ./p9/cmd/* -- $MAKEBB -o $(pwd)
 
 popd
+
+# gomodbb fetches its own source, so unlike everything above it needs neither a
+# checkout nor a workspace. Run it in an empty directory, with no module and no
+# go.work anywhere above it, so that a regression where it quietly relies on one
+# cannot pass.
+#
+# Fetching the revision cloned above, rather than a branch, keeps this from
+# failing the day u-root's default branch moves, and asks the question worth
+# asking: the same source reached two ways should build the same commands.
+GOMODBB_TMPDIR=$(mktemp -d)
+pushd $GOMODBB_TMPDIR
+
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR $GOMODBB -l github.com/u-root/u-root/cmds/core/...@$UROOT_REV > listed.txt
+grep -q '^github.com/u-root/u-root/cmds/core/ls$' listed.txt || (echo "gomodbb -l did not list ls" && exit 1)
+
+GOROOT=$GOROOT GOPATH=$EMPTY_TMPDIR $GOMODBB -o bb-gomodbb \
+  github.com/u-root/u-root/cmds/core/dmesg@$UROOT_REV \
+  github.com/u-root/u-root/cmds/core/ls@$UROOT_REV
+
+# Dispatch by argv[1], since argv[0] is not a command name here.
+./bb-gomodbb ls > /dev/null || (echo "busybox built by gomodbb cannot run ls" && exit 1)
+
+popd
+rm -rf $GOMODBB_TMPDIR
+
 rm -rf $TMPDIR
 # https://github.com/golang/go/issues/27455
 GOPATH=$EMPTY_TMPDIR $GO clean -cache -modcache
