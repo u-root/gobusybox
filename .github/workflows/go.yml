@@ -20,16 +20,60 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
+# Every job restores GOTOOLCHAIN=auto right after setting Go up.
+#
+# actions/setup-go v6 began exporting GOTOOLCHAIN=local unconditionally, so a
+# `go` command can never fetch a toolchain newer than the one the action
+# installed. That default is wrong here: makebb gives the module it generates
+# a `go` directive at least as high as the highest directive among the modules
+# it vendors, because the go tool otherwise refuses the build outright ("X in
+# vendor/modules.txt requires go >= Y"). Satisfying that directive is exactly
+# the toolchain selection v6 forbids; see writeModule in src/pkg/bb/module.go.
+# v4 never set GOTOOLCHAIN, so this restores the old behaviour rather than
+# inventing a new one.
+#
+# The pins in test-external-workspaces.sh are old enough not to trip this
+# today, but u-root's main branch already declares go 1.26.6, so once those
+# pins move, the older matrix entry would fail with an error naming
+# GOTOOLCHAIN rather than anything about makebb.
+#
+# Written to $GITHUB_ENV rather than an `env:` block because setup-go exports
+# its value that way too, and the last write to $GITHUB_ENV wins. The
+# precedence of `env:` against $GITHUB_ENV is undocumented; do not rely on it.
+#
+# Every job also pins ubuntu-26.04 rather than riding ubuntu-latest.
+#
+# The ubuntu-latest label is being repointed at 26.04 over several weeks from
+# 2026-10-19 (actions/runner-images#14748), so an unpinned job would migrate
+# partway through that window, and a failure would surface on some runs and
+# not others. Pinning turns that into one deliberate change.
+#
+# 26.04 is a real risk for this repository in particular: it mounts /tmp as a
+# RAM-backed tmpfs capped near 7.8G, with a per-user quota
+# (actions/runner-images#14777, still open upstream). makebb writes the tree
+# it generates, vendor directory included, under os.MkdirTemp (see
+# src/pkg/bb/bb.go), and `go build` puts $WORK there too;
+# test-external-workspaces.sh then builds u-root, gokrazy and p9 for three
+# architectures. If that exceeds the quota the failure reads "disk quota
+# exceeded" from the compiler, which names nothing useful. Point TMPDIR at
+# the root disk, which has far more room, if it does.
 jobs:
   tidy:
     name: Tidy
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: '1.25.x'
+          cache-dependency-path: src/go.sum
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: gofmt
         run: cd src && test -z "$(gofmt -s -l $(find -name '*.go'))"
@@ -48,17 +92,24 @@ jobs:
 
   unit-test:
     name: Unit Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          cache-dependency-path: src/go.sum
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |
@@ -75,17 +126,28 @@ jobs:
 
   test-gomodule:
     name: gobuilds
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          # This job builds src/cmd/makebb and then runs the tests in test/,
+          # which is a separate module.
+          cache-dependency-path: |
+            src/go.sum
+            test/go.sum
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |
@@ -103,17 +165,27 @@ jobs:
 
   test-external-workspaces:
     name: test-external-workspaces
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     strategy:
       matrix:
         goversion: ['1.25.x', '1.26.x']
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
+          # test-external-workspaces.sh ends with `go clean -cache -modcache`,
+          # so this job would save an emptied cache under a key the other jobs
+          # share. Opt out rather than poison it.
+          cache: false
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
 
       - name: Test
         run: |

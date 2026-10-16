@@ -19,8 +19,8 @@
 //
 // Principally, the AST transformation moves all global side-effects into
 // callable package functions. E.g. `main` becomes `registeredMain`, each
-// `init` becomes `initN`, and global variable assignments are moved into their
-// own `initN`.
+// `init` becomes a numbered `busyboxInitN`, and global variable assignments
+// are moved into their own `busyboxInitN`.
 package bb
 
 import (
@@ -82,15 +82,46 @@ func checkModules(cmds []*bbinternal.Package) error {
 	return fmt.Errorf("%w: %s; %s", ErrNoModule, strings.Join(noModule, ", "), gopathRemedy)
 }
 
+// checkDuplicate rejects commands whose names collide.
+//
+// A command is reached in the busybox by the base name of its directory, so
+// two packages sharing a base name cannot both be present however far apart
+// their import paths are.
+//
+// Every collision is reported rather than the first, because the patterns that
+// cause this match hundreds of packages and collide on a handful. Stopping at
+// the first turns one fix into a sequence of rebuilds, each of which pays for
+// a full load to reveal the next.
 func checkDuplicate(cmds []*bbinternal.Package) error {
-	seen := make(map[string]string)
+	paths := make(map[string][]string)
 	for _, cmd := range cmds {
-		if path, ok := seen[cmd.Name]; ok {
-			return fmt.Errorf("failed to build with bb: found duplicate command %s (%s and %s)", cmd.Name, path, cmd.Pkg.PkgPath)
-		}
-		seen[cmd.Name] = cmd.Pkg.PkgPath
+		paths[cmd.Name] = append(paths[cmd.Name], cmd.Pkg.PkgPath)
 	}
-	return nil
+
+	var names []string
+	for name, p := range paths {
+		if len(p) > 1 {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return nil
+	}
+	sort.Strings(names)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "failed to build with bb: %d duplicate command name", len(names))
+	if len(names) > 1 {
+		b.WriteString("s")
+	}
+	for _, name := range names {
+		p := paths[name]
+		sort.Strings(p)
+		fmt.Fprintf(&b, "\n\t%s: %s", name, strings.Join(p, ", "))
+	}
+	b.WriteString("\n\nName the ones to leave out as exclusions, e.g. -")
+	b.WriteString(paths[names[0]][0])
+	return errors.New(b.String())
 }
 
 // Opts are the arguments to BuildBusybox.
