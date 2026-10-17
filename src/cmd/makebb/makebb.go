@@ -7,7 +7,6 @@ package main
 
 import (
 	"flag"
-	"io/ioutil"
 	"log"
 	"os"
 	"path/filepath"
@@ -55,7 +54,7 @@ func main() {
 	tmpDir := *genDir
 	remove := false
 	if tmpDir == "" {
-		tdir, err := ioutil.TempDir("", "bb-")
+		tdir, err := os.MkdirTemp("", "bb-")
 		if err != nil {
 			l.Fatalf("Could not create busybox source directory: %v", err)
 		}
