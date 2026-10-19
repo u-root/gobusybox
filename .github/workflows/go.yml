@@ -32,11 +32,11 @@ concurrency:
 # v4 never set GOTOOLCHAIN, so this restores the old behaviour rather than
 # inventing a new one.
 #
-# The pins in test-external-workspaces.sh are old enough not to trip this
-# today -- the u-root rev pinned there declares go 1.19 -- but u-root's main
-# branch already declares go 1.26.6. Once those pins move past the matrix
-# entry below, the job would fail with an error naming GOTOOLCHAIN rather
-# than anything about makebb.
+# The pins in test/external_test.go are old enough not to trip this today --
+# the u-root rev pinned there declares go 1.19 -- but u-root's main branch
+# already declares go 1.26.6. Once those pins move past the matrix entry
+# below, the job would fail with an error naming GOTOOLCHAIN rather than
+# anything about makebb.
 #
 # The matrix lists only the Go versions src/go.mod actually supports. An entry
 # below the `go` directive either fails outright or silently downloads a newer
@@ -65,7 +65,7 @@ concurrency:
 # (actions/runner-images#14777, still open upstream). makebb writes the tree
 # it generates, vendor directory included, under os.MkdirTemp (see
 # src/pkg/bb/bb.go), and `go build` puts $WORK there too;
-# test-external-workspaces.sh then builds u-root, gokrazy and p9 for three
+# TestExternalWorkspaces then builds u-root, gokrazy and p9 for three
 # architectures. If that exceeds the quota the failure reads "disk quota
 # exceeded" from the compiler, which names nothing useful. Point TMPDIR at
 # the root disk, which has far more room, if it does.
@@ -220,7 +220,9 @@ jobs:
       - name: Test
         run: |
           mkdir cover
-          GOCOVERDIR=$(pwd)/cover ./gobuilds.sh
+          cd test
+          GOCOVERDIR=$(pwd)/../cover go test -v ./...
+          cd ..
           go tool covdata textfmt -i=cover -o cover.out
 
       - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a
@@ -244,10 +246,11 @@ jobs:
         uses: actions/setup-go@v7
         with:
           go-version: ${{ matrix.goversion }}
-          # test-external-workspaces.sh ends with `go clean -cache -modcache`,
-          # so this job would save an emptied cache under a key the other jobs
-          # share. Opt out rather than poison it.
-          cache: false
+          # These tests build makebb, goanywhere and gomodbb, then run them
+          # against u-root, gokrazy and p9, fetched from the module proxy.
+          cache-dependency-path: |
+            src/go.sum
+            test/go.sum
 
       - name: Allow toolchain selection
         run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
@@ -255,7 +258,9 @@ jobs:
       - name: Test
         run: |
           mkdir cover
-          GOCOVERDIR=$(pwd)/cover ./test-external-workspaces.sh
+          cd test
+          GOCOVERDIR=$(pwd)/../cover go test -external -timeout 60m -v ./...
+          cd ..
           go tool covdata textfmt -i=cover -o cover.out
 
       - uses: codecov/codecov-action@036b81c4b4e8314b391265bc226440f9e2117e2a

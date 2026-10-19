@@ -26,10 +26,7 @@ func skipIfUnsupported(t *testing.T, goVersion string, unsupportedGoVersions []s
 }
 
 func TestMakeBB(t *testing.T) {
-	if *makebb == "" {
-		t.Fatalf("Path to makebb is not set")
-	}
-	mkbb, _ := filepath.Abs(*makebb)
+	mkbb := buildTool(t, "makebb")
 	wd, _ := os.Getwd()
 
 	goVersion, err := golang.Default().Version()
@@ -116,11 +113,7 @@ func TestMakeBB(t *testing.T) {
 		t.Run(tt.testname, func(t *testing.T) {
 			skipIfUnsupported(t, goVersion, tt.unsupportedGoVersions)
 
-			dir, err := ioutil.TempDir("", tt.testname)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.RemoveAll(dir)
+			dir := t.TempDir()
 
 			for _, go111module := range []string{"on", "auto"} {
 				goEnv := "GO111MODULE=" + go111module
@@ -181,10 +174,7 @@ func TestMakeBB(t *testing.T) {
 }
 
 func TestBBSymlink(t *testing.T) {
-	if *makebb == "" {
-		t.Fatalf("Path to makebb is not set")
-	}
-	mkbb, _ := filepath.Abs(*makebb)
+	mkbb := buildTool(t, "makebb")
 
 	dir := t.TempDir()
 
@@ -195,7 +185,7 @@ func TestBBSymlink(t *testing.T) {
 	binary := filepath.Join(dir, "bb")
 
 	// Build the bb.
-	t.Logf("Run: (cd ./implicitimport && %s %s -o %s %s)", goEnv, *makebb, binary, cmdPath)
+	t.Logf("Run: (cd ./implicitimport && %s %s -o %s %s)", goEnv, mkbb, binary, cmdPath)
 
 	cmd := exec.Command(mkbb, "-o", binary, cmdPath)
 	cmd.Dir = "./implicitimport"

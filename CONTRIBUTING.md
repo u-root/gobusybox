@@ -30,18 +30,19 @@ cd src
 go test ./...
 ```
 
-CI runs on Go 1.26.x and 1.27.x; `src/go.mod` declares `go 1.26.0`. CI also
-runs the two integration scripts, which live at the repository root and are
-invoked from there, not from `src/`:
+CI runs on Go 1.27.x; `src/go.mod` declares `go 1.27.0`. CI also runs the
+integration tests, which live in the `test/` module rather than `src/`:
 
 ```sh
-./gobuilds.sh
-./test-external-workspaces.sh
+cd test
+go test ./...              # builds makebb and exercises the fixtures
+go test -external ./...    # also fetches u-root, gokrazy and p9
 ```
 
-Note that `test-external-workspaces.sh` runs `go clean -cache -modcache`.
-`GOCACHE` is not derived from `GOPATH`, so running that script locally will
-destroy your build cache. Point `GOCACHE` at a temporary directory first.
+`-external` is off by default because those tests fetch from the module proxy
+and take a few minutes. They build the tools they need, so there is nothing to
+compile or pass in by hand first, and they use no version control tool, so git
+need not be installed.
 
 ## Do not vendor
 
@@ -105,7 +106,7 @@ https://github.com/u-root/gobusybox. If the pull request closes an issue, note
 it as `Fixes #NNN`.
 
 These checks gate a merge: `Tidy` (gofmt and `go mod tidy` drift), `Unit Test`,
-`gobuilds` and `test-external-workspaces` on both Go versions, and `DCO`.
+`gobuilds` and `test-external-workspaces`, and `DCO`.
 `codecov/project` reports a transient failure while other jobs are still
 uploading; wait for all jobs before believing it.
 
