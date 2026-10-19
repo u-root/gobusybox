@@ -16,7 +16,6 @@ import (
 	"go/parser"
 	"go/token"
 	"go/types"
-	"io/ioutil"
 	"os"
 	"path"
 	"path/filepath"
@@ -161,6 +160,35 @@ func (p *Package) nextInit(addToCallList bool) *ast.Ident {
 	}
 	p.initCount++
 	return i
+}
+
+// addVarInit moves one global initializer into a busybox init of its own,
+// appended to f, and records the call to it in initAssigns.
+//
+// lhs holds every name the value initializes: one for `var a = f()`, and all
+// of them for `var a, b = f()`, which must be assigned in a single statement
+// because the value can only be evaluated once. value is the key Rewrite
+// looks up to place the call in init order, so it must be the same expression
+// go/types recorded, not a copy.
+func (p *Package) addVarInit(f *ast.File, lhs []ast.Expr, value ast.Expr) {
+	varInit := &ast.FuncDecl{
+		Name: p.nextInit(false),
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{},
+			Results: nil,
+		},
+		Body: &ast.BlockStmt{
+			List: []ast.Stmt{
+				&ast.AssignStmt{
+					Lhs: lhs,
+					Tok: token.ASSIGN,
+					Rhs: []ast.Expr{value},
+				},
+			},
+		},
+	}
+	p.initAssigns[value] = &ast.ExprStmt{X: &ast.CallExpr{Fun: varInit.Name}}
+	f.Decls = append(f.Decls, varInit)
 }
 
 // importName finds the package path to import, given the go/types pkg path.
@@ -339,47 +367,60 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 			if d.Tok != token.VAR {
 				break
 			}
+			var specs []ast.Spec
 			for _, spec := range d.Specs {
 				s := spec.(*ast.ValueSpec)
 				if s.Values == nil {
+					specs = append(specs, s)
 					continue
 				}
 
-				// For each assignment, create a new init
-				// function, and place it in the same file.
-				for i, name := range s.Names {
-					varInit := &ast.FuncDecl{
-						Name: p.nextInit(false),
-						Type: &ast.FuncType{
-							Params:  &ast.FieldList{},
-							Results: nil,
-						},
-						Body: &ast.BlockStmt{
-							List: []ast.Stmt{
-								&ast.AssignStmt{
-									Lhs: []ast.Expr{name},
-									Tok: token.ASSIGN,
-									Rhs: []ast.Expr{s.Values[i]},
-								},
-							},
-						},
+				// A var spec either gives one value per name,
+				// or one multi-valued expression for all of
+				// them -- `var a, b = f()` and the comma-ok
+				// forms.
+				//
+				// go/types groups its initializers the same
+				// way, and initAssigns is keyed by the value
+				// expression, so create one busybox init per
+				// value rather than one per name. Indexing the
+				// values by the name's index only holds in the
+				// first case.
+				if len(s.Values) == len(s.Names) {
+					for i, name := range s.Names {
+						p.addVarInit(f, []ast.Expr{name}, s.Values[i])
 					}
-					// Add a call to the new init func to
-					// this map, so they can be added to
-					// Init0() in the correct init order
-					// later.
-					p.initAssigns[s.Values[i]] = &ast.ExprStmt{X: &ast.CallExpr{Fun: varInit.Name}}
-					f.Decls = append(f.Decls, varInit)
-				}
-
-				// Add the type of the expression to the global
-				// declaration instead.
-				if s.Type == nil {
-					typ := p.Pkg.TypesInfo.Types[s.Values[0]]
-					s.Type = ast.NewIdent(types.TypeString(typ.Type, qualifier))
+				} else {
+					lhs := make([]ast.Expr, len(s.Names))
+					for i, name := range s.Names {
+						lhs[i] = name
+					}
+					p.addVarInit(f, lhs, s.Values[0])
 				}
 				s.Values = nil
+
+				// Add the type to the global declaration
+				// instead, since the value has moved away.
+				if s.Type != nil {
+					// Already written out, and shared by
+					// every name in the spec.
+					specs = append(specs, s)
+					continue
+				}
+				// Inferred types need not agree across the
+				// names -- `var f, err = os.Open(p)` -- and a
+				// spec holds only one type, so give each name
+				// its own spec. format.Node parenthesizes the
+				// declaration when there is more than one.
+				for _, name := range s.Names {
+					typ := p.Pkg.TypesInfo.Defs[name].Type()
+					specs = append(specs, &ast.ValueSpec{
+						Names: []*ast.Ident{name},
+						Type:  ast.NewIdent(types.TypeString(typ, qualifier)),
+					})
+				}
 			}
+			d.Specs = specs
 
 		case *ast.FuncDecl:
 			if d.Recv == nil && d.Name.Name == "main" {
@@ -561,7 +602,7 @@ func writeGoFile(path string, code []byte) error {
 		return fmt.Errorf("bad parse while processing imports %q: %v", path, err)
 	}
 
-	if err := ioutil.WriteFile(path, code, 0644); err != nil {
+	if err := os.WriteFile(path, code, 0644); err != nil {
 		return fmt.Errorf("error writing Go file to %q: %v", path, err)
 	}
 	return nil
