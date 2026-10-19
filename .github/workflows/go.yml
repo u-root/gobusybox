@@ -41,7 +41,7 @@ concurrency:
 # The matrix lists only the Go versions src/go.mod actually supports. An entry
 # below the `go` directive either fails outright or silently downloads a newer
 # toolchain and tests that instead, which is what 1.20, 1.21 and 1.22 did
-# before 515829d. src/go.mod declares go 1.26.0, so the list runs from 1.26.x
+# before 515829d. src/go.mod declares go 1.27.0, so the list runs from 1.27.x
 # up to the current release. Add each release as it ships; remove an entry only
 # when the directive itself moves past it.
 #
@@ -78,7 +78,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.26.x'
+          go-version: '1.27.x'
           cache-dependency-path: src/go.sum
 
       - name: Allow toolchain selection
@@ -110,7 +110,7 @@ jobs:
           # Matched to the floor rather than matrixed, for the same reason
           # Tidy is: what the linters report is a property of the source, not
           # of the toolchain compiling it.
-          go-version: '1.26.x'
+          go-version: '1.27.x'
           cache-dependency-path: src/go.sum
 
       - name: Allow toolchain selection
@@ -125,6 +125,22 @@ jobs:
           # of the configuration". A pin turns that kind of upstream break
           # into a deliberate version bump instead of a surprise one morning.
           version: v2.15.0
+          # Build golangci-lint from source rather than downloading the
+          # released binary.
+          #
+          # golangci-lint embeds go/types, which refuses to check source
+          # declaring a language version newer than the toolchain that built
+          # the linter: "the Go language version (go1.26) used to build
+          # golangci-lint is lower than the targeted Go version (1.27.0)".
+          # Every v2.15.0 binary on the releases page is built with Go 1.26,
+          # and v2.15.0 is the newest release, so there is no published
+          # binary that can lint this module since the directive moved to
+          # 1.27. install-mode: goinstall compiles the same pinned version
+          # with the toolchain this job set up, which can.
+          #
+          # Revert to the default binary mode once a release built with Go
+          # 1.27 or newer exists; it installs faster.
+          install-mode: goinstall
           # src/ is the module; the repository root is not one. The config
           # lives at src/.golangci.yml.
           working-directory: src
@@ -153,7 +169,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.26.x', '1.27.x']
+        goversion: ['1.27.x']
     steps:
       - uses: actions/checkout@v7
 
@@ -184,7 +200,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.26.x', '1.27.x']
+        goversion: ['1.27.x']
     steps:
       - uses: actions/checkout@v7
 
@@ -220,7 +236,7 @@ jobs:
     runs-on: ubuntu-26.04
     strategy:
       matrix:
-        goversion: ['1.26.x', '1.27.x']
+        goversion: ['1.27.x']
     steps:
       - uses: actions/checkout@v7
 
