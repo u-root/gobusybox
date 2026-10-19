@@ -34,9 +34,12 @@ not create one. Creating one makes every later build fail with "inconsistent
 vendoring", and the error does not say a stray vendor directory is the cause.
 `go mod tidy` is fine and is checked by CI.
 
-**`test-external-workspaces.sh` runs `go clean -cache -modcache`.** `GOCACHE`
-is not derived from `GOPATH`, so running it locally destroys your build cache.
-Set `GOCACHE` to a temporary directory first.
+**The integration tests live in `test/`, not `src/`.** `cd test && go test
+./...` builds `makebb` itself and runs the fixtures. Add `-external` to also
+fetch u-root, gokrazy and p9; it is off by default because it needs the
+network and a few minutes. Nothing needs building or passing in by hand, and
+nothing needs git: the source comes from the module proxy, with `GOVCS=*:off`
+to keep it that way.
 
 **`makebb`'s flag names differ from its Go field names.** Generate-only is
 `-g`, and the output directory is `-gen-dir`, which sets `Opts.GenSrcDir`.

@@ -10,8 +10,14 @@ case names, runs each one, and compares its output. `resolve-modules` is the
 exception, and belongs to the `findpkg` unit tests instead.
 
 ```sh
-./gobuilds.sh     # builds makebb, then runs these
+go test ./...              # builds makebb, then runs these
+go test -external ./...    # also fetches u-root, gokrazy and p9
 ```
+
+`external_test.go` holds the `-external` cases: real third-party trees built
+through a Go workspace, and `gomodbb` building from the module proxy with no
+source tree at all. Every one of them takes its source from the module proxy,
+so the suite needs no version control tool installed.
 
 | Directory | What it covers |
 | --- | --- |
