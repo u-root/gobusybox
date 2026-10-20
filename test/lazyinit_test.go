@@ -76,21 +76,24 @@ func buildBusybox(t *testing.T, mkbb, dir, name string, f fixture, extra []strin
 // GODEBUG=inittrace=1, which the runtime writes to stderr -- the same place
 // several fixtures write their own output -- so it is kept to a run of its
 // own rather than filtered back out of a shared one.
-func runCommand(t *testing.T, binary, cmdName string) commandRun {
+func runCommand(t *testing.T, binary, cmdName string, args ...string) commandRun {
 	t.Helper()
 
-	t.Logf("Run: %s %s", binary, cmdName)
-	cmd := exec.Command(binary, cmdName)
-	out, err := cmd.CombinedOutput()
-	exitIsAResult(t, binary, cmdName, err)
+	argv := append([]string{cmdName}, args...)
+	shown := strings.Join(argv, " ")
 
-	t.Logf("Run: GODEBUG=inittrace=1 %s %s", binary, cmdName)
+	t.Logf("Run: %s %s", binary, shown)
+	cmd := exec.Command(binary, argv...)
+	out, err := cmd.CombinedOutput()
+	exitIsAResult(t, binary, shown, err)
+
+	t.Logf("Run: GODEBUG=inittrace=1 %s %s", binary, shown)
 	var stderr bytes.Buffer
-	trace := exec.Command(binary, cmdName)
+	trace := exec.Command(binary, argv...)
 	trace.Env = append(os.Environ(), "GODEBUG=inittrace=1")
 	trace.Stdout = io.Discard
 	trace.Stderr = &stderr
-	exitIsAResult(t, binary, cmdName, trace.Run())
+	exitIsAResult(t, binary, shown, trace.Run())
 
 	return commandRun{
 		output:       string(out),
@@ -135,6 +138,23 @@ func initTracePackages(stderr string) []string {
 		pkgs = append(pkgs, fields[1])
 	}
 	return pkgs
+}
+
+// compareRuns checks that one command behaved the same in both builds, on all
+// three channels. Output and exit status must match whatever laziness does;
+// only compareInitTrace is expected to be relaxed later.
+func compareRuns(t *testing.T, cmdName string, baseline, candidate commandRun) {
+	t.Helper()
+
+	if baseline.output != candidate.output {
+		t.Errorf("Output of %s differs between the two builds:\n\tbaseline  = %q\n\tcandidate = %q",
+			cmdName, baseline.output, candidate.output)
+	}
+	if baseline.exitCode != candidate.exitCode {
+		t.Errorf("Exit status of %s differs between the two builds: baseline = %d, candidate = %d",
+			cmdName, baseline.exitCode, candidate.exitCode)
+	}
+	compareInitTrace(t, cmdName, baseline, candidate)
 }
 
 // compareInitTrace reports any difference between which packages ran their
@@ -217,20 +237,68 @@ func TestLazyInitDifferential(t *testing.T) {
 			// a rewrite defect bad enough to break the build fails above.
 			for _, cmdName := range slices.Sorted(maps.Keys(tt.want)) {
 				t.Run(cmdName, func(t *testing.T) {
-					base := runCommand(t, baseline, cmdName)
-					lazy := runCommand(t, candidate, cmdName)
-
-					if base.output != lazy.output {
-						t.Errorf("Output of %s differs between the two builds:\n\tbaseline  = %q\n\tcandidate = %q",
-							cmdName, base.output, lazy.output)
-					}
-					if base.exitCode != lazy.exitCode {
-						t.Errorf("Exit status of %s differs between the two builds: baseline = %d, candidate = %d",
-							cmdName, base.exitCode, lazy.exitCode)
-					}
-					compareInitTrace(t, cmdName, base, lazy)
+					compareRuns(t, cmdName,
+						runCommand(t, baseline, cmdName),
+						runCommand(t, candidate, cmdName))
 				})
 			}
 		})
 	}
+}
+
+// TestLazyInitDifferentialGomodbb is the same check for the other caller of
+// the build engine.
+//
+// makebb and gomodbb share one engine -- bb.BuildBusybox, and with it the
+// entire rewrite, which lives in pkg/bb and nowhere else. The fixtures above
+// therefore already cover the code a deferred init would break, for both
+// commands. What they do not cover is the *input* gomodbb hands that engine:
+// it resolves packages inside a synthetic module, with Env.Dir set and
+// GOWORK=off, over source in a read-only module cache rather than a checkout.
+// makebb never does any of that, so no fixture can produce the shape. Since
+// deferring a library's init is decided from the import graph, the context
+// that graph is resolved in is worth a check of its own.
+//
+// It needs the proxy, so it sits behind -external and the default suite is
+// unchanged. That is a weaker guarantee than the fixtures get, and the reason
+// is gomodbb pinning GOPROXY to the public proxy: until it can be pointed at
+// a warm module cache, there is no offline gomodbb to put in the default
+// suite.
+func TestLazyInitDifferentialGomodbb(t *testing.T) {
+	if !*external {
+		t.Skip("Skipping; pass -external to fetch from the module proxy and run this")
+	}
+
+	dir := t.TempDir()
+	env := []string{"GOPATH=" + scratchGOPATH(t)}
+	gomodbbBin := buildTool(t, "gomodbb")
+
+	// Both builds share one fetching module. The second then resolves
+	// nothing, because the go.mod the first wrote already records what the
+	// patterns came to, which is what -mod-dir is for. Without it the proxy
+	// would be asked the same question twice, and the two builds could in
+	// principle be handed different source.
+	modDir := filepath.Join(dir, "fetch")
+
+	cmds := []string{
+		"github.com/u-root/u-root/cmds/core/echo@" + urootRev,
+		"github.com/u-root/u-root/cmds/core/ls@" + urootRev,
+	}
+
+	build := func(name string, extra []string) string {
+		args := append([]string{"-mod-dir", modDir, "-o", name}, extra...)
+		run(t, dir, env, gomodbbBin, append(args, cmds...)...)
+		return filepath.Join(dir, name)
+	}
+
+	baseline := build("bb-baseline", nil)
+	candidate := build("bb-lazy", lazyInitArgs)
+
+	// echo rather than ls: its output depends on nothing outside the
+	// process, so a difference between the two builds is the rewrite and
+	// not the directory they happened to run in. Dispatching echo still
+	// runs every package's init, which is the whole complaint.
+	compareRuns(t, "echo",
+		runCommand(t, baseline, "echo", "hello"),
+		runCommand(t, candidate, "echo", "hello"))
 }
