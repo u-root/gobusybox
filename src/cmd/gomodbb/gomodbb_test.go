@@ -410,6 +410,57 @@ func TestGoCmdKeepsTheCallersProxy(t *testing.T) {
 	}
 }
 
+// TestProxyless covers the GOPROXY warning: both the predicate that decides
+// whether to warn and the wording it produces.
+//
+// The case that matters most is the go command's own default. It ends in
+// "direct", so a test for the keyword alone would warn every caller who has
+// configured nothing -- the exact people for whom gomodbb is meant to need no
+// configuration at all.
+func TestProxyless(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		goproxy string
+		want    bool
+	}{
+		{"the go command's default must never warn", "https://proxy.golang.org,direct", false},
+		{"empty falls back to that default", "", false},
+		{"only whitespace falls back too", "   ", false},
+		{"a proxy of one's own", "https://corp.example.com", false},
+		{"a proxy with a direct fallback", "https://corp.example.com,direct", false},
+		{"pipe is a separator too", "https://a.example.com|https://b.example.com", false},
+		{"a cache standing in for the network", "file:///var/cache/gomod", false},
+		{"direct alone names no proxy", "direct", true},
+		{"off alone names no proxy", "off", true},
+		{"keywords only, comma separated", "direct,off", true},
+		{"keywords only, pipe separated", "off|direct", true},
+		{"keywords only, with whitespace", " direct , off ", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := proxyless(tt.goproxy); got != tt.want {
+				t.Errorf("proxyless(%q) = %v, want %v", tt.goproxy, got, tt.want)
+			}
+
+			warning := proxylessWarning(tt.goproxy)
+			if got := warning != ""; got != tt.want {
+				t.Errorf("proxylessWarning(%q) = %q, want a warning: %v", tt.goproxy, warning, tt.want)
+			}
+			if !tt.want {
+				return
+			}
+			// A warning that does not quote the offending value leaves
+			// the reader guessing which setting to change, and one that
+			// does not say what to do instead is only half a warning.
+			if !strings.Contains(warning, tt.goproxy) {
+				t.Errorf("proxylessWarning(%q) = %q, which does not name the value", tt.goproxy, warning)
+			}
+			if !strings.Contains(warning, "Unset GOPROXY") {
+				t.Errorf("proxylessWarning(%q) = %q, which does not say what to do", tt.goproxy, warning)
+			}
+		})
+	}
+}
+
 func TestModuleDir(t *testing.T) {
 	t.Run("temporary directory is the caller's to remove", func(t *testing.T) {
 		dir, remove, err := moduleDir("")
