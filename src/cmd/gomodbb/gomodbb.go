@@ -148,22 +148,30 @@ func (p pattern) commandPath() string {
 // goCmd returns a go command to run against the fetching module.
 //
 // Source comes from the module proxy, never from a version control tool.
-// Pinning GOPROXY does not establish that on its own: GOPRIVATE and GONOPROXY
-// name paths that bypass the proxy and are fetched with git, and both are read
-// from the caller's environment. Clearing them makes the pinned proxy
-// authoritative, and GOVCS refuses the fetch if anything still reaches for a
-// VCS, which reports the policy instead of the missing tool. The distinction
-// matters because golang.Environ reduces PATH to $GOROOT/bin, so git is not
-// found even when the caller has it:
+// GOVCS is what establishes that, and it is the only setting that can: it
+// refuses the fetch whatever the proxy is, and names the rule rather than a
+// missing tool. That distinction matters because golang.Environ reduces PATH
+// to $GOROOT/bin, so git is absent even when the caller has it, and the bare
+// failure blames git instead of the policy:
 //
 //	go: github.com/u-root/uio@latest: unable to resolve git version:
 //	failed to execute git version: exec: "git": executable file not found in $PATH
+//
+// GOPRIVATE and GONOPROXY are cleared because both name paths that bypass the
+// proxy, and both are read from the caller's environment.
+//
+// GOPROXY is deliberately left alone. The go command's own default is
+// https://proxy.golang.org,direct, so a caller who has set nothing already
+// fetches through the public proxy: using gomodbb must never require setting
+// GOPROXY, and does not. Pinning it would add nothing to the guarantee above,
+// because GOVCS already refuses a VCS, while overriding a caller who has a
+// proxy of their own -- a corporate mirror, or a cache standing in for the
+// network so that a test can run offline.
 //
 // exec uses the last value for a repeated key, so these override the caller's.
 func goCmd(env *golang.Environ, gocmd string, args ...string) *exec.Cmd {
 	cmd := env.GoCmd(gocmd, args...)
 	cmd.Env = append(cmd.Env,
-		"GOPROXY=https://proxy.golang.org",
 		"GOPRIVATE=",
 		"GONOPROXY=",
 		"GOVCS=*:off",
