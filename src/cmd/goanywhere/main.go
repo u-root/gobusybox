@@ -20,6 +20,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -44,7 +45,7 @@ var (
 	versionFlag = flag.String("v", "", "Go version for workspace file")
 )
 
-func run(dir string, args []string, paths []string) {
+func run(dir string, args []string, paths []string) error {
 	var relPaths []string
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -68,11 +69,19 @@ func run(dir string, args []string, paths []string) {
 	c := exec.Command(args[0], append(args[1:], relPaths...)...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	c.Dir = dir
-	if err := c.Run(); err != nil {
-		log.Fatalf("Exited with %v", err)
-		os.Exit(1)
+	return c.Run()
+}
+
+// newWorkspaceDir creates the directory that holds the generated workspace and
+// returns it together with the function that removes it again. The caller
+// runs the cleanup when it returns, so the workspace does not outlive the
+// command.
+func newWorkspaceDir() (string, func(), error) {
+	dir, err := os.MkdirTemp("", "goanywhere-")
+	if err != nil {
+		return "", nil, err
 	}
-	os.Exit(0)
+	return dir, func() { os.RemoveAll(dir) }, nil
 }
 
 // moduleGoVersion returns the go directive of the go.mod in dir, or "" if it
@@ -93,19 +102,26 @@ func moduleGoVersion(dir string) (string, error) {
 }
 
 func main() {
+	os.Exit(realMain())
+}
+
+func realMain() int {
 	flag.Parse()
 	log.SetPrefix("[goanywhere] ")
 
 	args := flag.Args()
 	if len(args) == 0 {
-		log.Fatalf("Usage: goanywhere $pkg... -- <command> ...")
+		log.Printf("Usage: goanywhere $pkg... -- <command> ...")
+		return 1
 	}
 	dashIndex := slices.Index(args, "--")
 	if dashIndex == -1 {
-		log.Fatalf("Must use -- to distinguish Go packages from command. Usage: goanywhere $pkg... -- <command> ...")
+		log.Printf("Must use -- to distinguish Go packages from command. Usage: goanywhere $pkg... -- <command> ...")
+		return 1
 	}
 	if len(args) == dashIndex+1 {
-		log.Fatalf("Must provide command to run. Usage: goanywhere $pkg... -- <command> ...")
+		log.Printf("Must provide command to run. Usage: goanywhere $pkg... -- <command> ...")
+		return 1
 	}
 	pkgs := args[:dashIndex]
 	args = args[dashIndex+1:]
@@ -115,21 +131,24 @@ func main() {
 	mods, noModulePaths := findpkg.Modules(paths)
 
 	if env.GO111MODULE == "off" {
-		log.Fatalf("GO111MODULE=off is not supported: goanywhere exists to generate a go.work, which GOPATH mode cannot use. Unset GO111MODULE, or set it to on.")
+		log.Printf("GO111MODULE=off is not supported: goanywhere exists to generate a go.work, which GOPATH mode cannot use. Unset GO111MODULE, or set it to on.")
+		return 1
 	}
 
 	if len(noModulePaths) > 0 {
-		log.Fatalf("No modules found for %v", noModulePaths)
+		log.Printf("No modules found for %v", noModulePaths)
+		return 1
 	}
 
 	var dir string
 	if *tmp {
-		var err error
-		dir, err = os.MkdirTemp("", "goanywhere-")
+		workspace, cleanup, err := newWorkspaceDir()
 		if err != nil {
-			log.Fatalf("Could not create temp dir: %v", err)
+			log.Printf("Could not create temp dir: %v", err)
+			return 1
 		}
-		defer os.RemoveAll(dir)
+		defer cleanup()
+		dir = workspace
 	}
 
 	if *versionFlag == "" {
@@ -139,7 +158,8 @@ func main() {
 		}
 		*versionFlag = golang.MajorMinorGoVersion(v, "")
 		if *versionFlag == "" {
-			log.Fatalf("Could not determine version from %v (set a version with -v flag)", v)
+			log.Printf("Could not determine version from %v (set a version with -v flag)", v)
+			return 1
 		}
 	}
 
@@ -153,7 +173,8 @@ func main() {
 	for dir := range mods {
 		mv, err := moduleGoVersion(dir)
 		if err != nil {
-			log.Fatalf("Could not read go.mod in %s: %v", dir, err)
+			log.Printf("Could not read go.mod in %s: %v", dir, err)
+			return 1
 		}
 		if golang.CompareGoVersions(mv, *versionFlag) > 0 {
 			*versionFlag = mv
@@ -177,12 +198,21 @@ use ({{range .Modules}}
 	t := template.Must(template.New("tpl").Parse(tpl))
 	var b bytes.Buffer
 	if err := t.Execute(&b, vars); err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.work"), b.Bytes(), 0o644); err != nil {
-		log.Fatal(err)
+		log.Print(err)
+		return 1
 	}
-	defer os.Remove(filepath.Join(dir, "go.work"))
 
-	run(dir, args, paths)
+	if err := run(dir, args, paths); err != nil {
+		log.Printf("Exited with %v", err)
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		return 1
+	}
+	return 0
 }
