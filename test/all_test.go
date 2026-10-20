@@ -25,28 +25,39 @@ func skipIfUnsupported(t *testing.T, goVersion string, unsupportedGoVersions []s
 	}
 }
 
-func TestMakeBB(t *testing.T) {
-	mkbb := buildTool(t, "makebb")
-	wd, _ := os.Getwd()
+// fixture is one busybox built out of the directories beside this file: where
+// to build it from, which commands go into it, and what each of those commands
+// prints.
+type fixture struct {
+	testname string
+	// file paths to commands to compile
+	cmds []string
+	// Working directory
+	wd string
+	// extra args to makebb
+	extraArgs []string
+	// command name -> expected output. A fixture that leaves this empty is
+	// built but never run, because its output is not predictable.
+	want map[string]string
+	// Go versions for which this test should be skipped.
+	unsupportedGoVersions []string
+}
 
-	goVersion, err := golang.Default().Version()
+// fixtures lists every fixture busybox the suite knows about.
+//
+// Two tests build these. TestMakeBB checks that each command prints what it
+// should, and TestLazyInitDifferential builds each fixture twice and checks
+// that the two builds agree. They read one list rather than keeping one each,
+// so that a fixture added for either is seen by both.
+func fixtures(t *testing.T) []fixture {
+	t.Helper()
+
+	wd, err := os.Getwd()
 	if err != nil {
-		t.Fatalf("Could not determine Go version: %v", err)
+		t.Fatalf("Could not determine working directory: %v", err)
 	}
 
-	for _, tt := range []struct {
-		testname string
-		// file paths to commands to compile
-		cmds []string
-		// Working directory
-		wd string
-		// extra args to makebb
-		extraArgs []string
-		// command name -> expected output
-		want map[string]string
-		// Go versions for which this test should be skipped.
-		unsupportedGoVersions []string
-	}{
+	return []fixture{
 		{
 			testname:              "goembed",
 			cmds:                  []string{"."},
@@ -109,7 +120,18 @@ func TestMakeBB(t *testing.T) {
 				"helloworld": "hello world\n",
 			},
 		},
-	} {
+	}
+}
+
+func TestMakeBB(t *testing.T) {
+	mkbb := buildTool(t, "makebb")
+
+	goVersion, err := golang.Default().Version()
+	if err != nil {
+		t.Fatalf("Could not determine Go version: %v", err)
+	}
+
+	for _, tt := range fixtures(t) {
 		t.Run(tt.testname, func(t *testing.T) {
 			skipIfUnsupported(t, goVersion, tt.unsupportedGoVersions)
 
