@@ -358,9 +358,15 @@ func lastEnv(env []string, key string) string {
 //
 //	go: github.com/u-root/uio@latest: unable to resolve git version:
 //	failed to execute git version: exec: "git": executable file not found in $PATH
+//
+// GOVCS is the setting that refuses a VCS, so it is forced even against a
+// caller asking for the opposite. GOPROXY is not forced; see
+// TestGoCmdKeepsTheCallersProxy.
 func TestGoCmdNeverUsesAVCS(t *testing.T) {
 	// Values a caller might plausibly have, each of which would otherwise
-	// send the go command to a VCS.
+	// send the go command to a VCS. GOPROXY=direct is the most hostile of
+	// them, and is left in place on purpose: GOVCS must refuse the fetch
+	// without help from a pinned proxy.
 	t.Setenv("GOPROXY", "direct")
 	t.Setenv("GOPRIVATE", "github.com/u-root/*")
 	t.Setenv("GONOPROXY", "github.com/u-root/*")
@@ -372,7 +378,6 @@ func TestGoCmdNeverUsesAVCS(t *testing.T) {
 		key  string
 		want string
 	}{
-		{"GOPROXY", "https://proxy.golang.org"},
 		{"GOPRIVATE", ""},
 		{"GONOPROXY", ""},
 		{"GOVCS", "*:off"},
@@ -380,6 +385,79 @@ func TestGoCmdNeverUsesAVCS(t *testing.T) {
 		if got := lastEnv(cmd.Env, tt.key); got != tt.want {
 			t.Errorf("goCmd() %s = %q, want %q", tt.key, got, tt.want)
 		}
+	}
+}
+
+// TestGoCmdKeepsTheCallersProxy pins that gomodbb never overrides GOPROXY.
+//
+// Using gomodbb must not require setting GOPROXY to the public proxy. It does
+// not need to: the go command's own default is
+// https://proxy.golang.org,direct, so a caller who has set nothing reaches the
+// public proxy anyway. A caller who has set one -- a corporate mirror, or a
+// cache standing in for the network so that a test can run offline -- keeps
+// it, which a pin would have taken away for no gain, since GOVCS and not
+// GOPROXY is what refuses a VCS.
+func TestGoCmdKeepsTheCallersProxy(t *testing.T) {
+	const callers = "https://proxy.example.com"
+	t.Setenv("GOPROXY", callers)
+
+	cmd := goCmd(golang.Default(), "get", "example.com/m")
+
+	// exec takes the last value for a repeated key, so a GOPROXY appended
+	// by goCmd would win over the caller's and show up here.
+	if got := lastEnv(cmd.Env, "GOPROXY"); got != callers {
+		t.Errorf("goCmd() GOPROXY = %q, want the caller's %q", got, callers)
+	}
+}
+
+// TestProxyless covers the GOPROXY warning: both the predicate that decides
+// whether to warn and the wording it produces.
+//
+// The case that matters most is the go command's own default. It ends in
+// "direct", so a test for the keyword alone would warn every caller who has
+// configured nothing -- the exact people for whom gomodbb is meant to need no
+// configuration at all.
+func TestProxyless(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		goproxy string
+		want    bool
+	}{
+		{"the go command's default must never warn", "https://proxy.golang.org,direct", false},
+		{"empty falls back to that default", "", false},
+		{"only whitespace falls back too", "   ", false},
+		{"a proxy of one's own", "https://corp.example.com", false},
+		{"a proxy with a direct fallback", "https://corp.example.com,direct", false},
+		{"pipe is a separator too", "https://a.example.com|https://b.example.com", false},
+		{"a cache standing in for the network", "file:///var/cache/gomod", false},
+		{"direct alone names no proxy", "direct", true},
+		{"off alone names no proxy", "off", true},
+		{"keywords only, comma separated", "direct,off", true},
+		{"keywords only, pipe separated", "off|direct", true},
+		{"keywords only, with whitespace", " direct , off ", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := proxyless(tt.goproxy); got != tt.want {
+				t.Errorf("proxyless(%q) = %v, want %v", tt.goproxy, got, tt.want)
+			}
+
+			warning := proxylessWarning(tt.goproxy)
+			if got := warning != ""; got != tt.want {
+				t.Errorf("proxylessWarning(%q) = %q, want a warning: %v", tt.goproxy, warning, tt.want)
+			}
+			if !tt.want {
+				return
+			}
+			// A warning that does not quote the offending value leaves
+			// the reader guessing which setting to change, and one that
+			// does not say what to do instead is only half a warning.
+			if !strings.Contains(warning, tt.goproxy) {
+				t.Errorf("proxylessWarning(%q) = %q, which does not name the value", tt.goproxy, warning)
+			}
+			if !strings.Contains(warning, "Unset GOPROXY") {
+				t.Errorf("proxylessWarning(%q) = %q, which does not say what to do", tt.goproxy, warning)
+			}
+		})
 	}
 }
 

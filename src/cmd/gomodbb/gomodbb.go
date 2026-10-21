@@ -148,22 +148,30 @@ func (p pattern) commandPath() string {
 // goCmd returns a go command to run against the fetching module.
 //
 // Source comes from the module proxy, never from a version control tool.
-// Pinning GOPROXY does not establish that on its own: GOPRIVATE and GONOPROXY
-// name paths that bypass the proxy and are fetched with git, and both are read
-// from the caller's environment. Clearing them makes the pinned proxy
-// authoritative, and GOVCS refuses the fetch if anything still reaches for a
-// VCS, which reports the policy instead of the missing tool. The distinction
-// matters because golang.Environ reduces PATH to $GOROOT/bin, so git is not
-// found even when the caller has it:
+// GOVCS is what establishes that, and it is the only setting that can: it
+// refuses the fetch whatever the proxy is, and names the rule rather than a
+// missing tool. That distinction matters because golang.Environ reduces PATH
+// to $GOROOT/bin, so git is absent even when the caller has it, and the bare
+// failure blames git instead of the policy:
 //
 //	go: github.com/u-root/uio@latest: unable to resolve git version:
 //	failed to execute git version: exec: "git": executable file not found in $PATH
+//
+// GOPRIVATE and GONOPROXY are cleared because both name paths that bypass the
+// proxy, and both are read from the caller's environment.
+//
+// GOPROXY is deliberately left alone. The go command's own default is
+// https://proxy.golang.org,direct, so a caller who has set nothing already
+// fetches through the public proxy: using gomodbb must never require setting
+// GOPROXY, and does not. Pinning it would add nothing to the guarantee above,
+// because GOVCS already refuses a VCS, while overriding a caller who has a
+// proxy of their own -- a corporate mirror, or a cache standing in for the
+// network so that a test can run offline.
 //
 // exec uses the last value for a repeated key, so these override the caller's.
 func goCmd(env *golang.Environ, gocmd string, args ...string) *exec.Cmd {
 	cmd := env.GoCmd(gocmd, args...)
 	cmd.Env = append(cmd.Env,
-		"GOPROXY=https://proxy.golang.org",
 		"GOPRIVATE=",
 		"GONOPROXY=",
 		"GOVCS=*:off",
@@ -246,6 +254,76 @@ func writeGoMod(modDir string) error {
 	return nil
 }
 
+// proxyless reports whether a GOPROXY value names no module proxy at all.
+//
+// The value is a list separated by commas or pipes, whose entries are either
+// a proxy URL or one of the keywords "direct" and "off". The go command's own
+// default is "https://proxy.golang.org,direct", so a keyword in the list
+// means nothing on its own -- only a list with no URL left in it leaves the
+// go command nothing gomodbb is allowed to fetch from.
+func proxyless(goproxy string) bool {
+	if strings.TrimSpace(goproxy) == "" {
+		// The go command falls back to its own default, which is a proxy.
+		return false
+	}
+	for _, entry := range strings.FieldsFunc(goproxy, func(r rune) bool {
+		return r == ',' || r == '|'
+	}) {
+		switch strings.TrimSpace(entry) {
+		case "", "direct", "off":
+			// A keyword, not somewhere to fetch from.
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// proxylessWarning returns the warning to print for a GOPROXY value, or ""
+// when the value names a proxy and there is nothing worth saying.
+//
+// It is separate from the lookup below so that the decision and the wording
+// can be tested without running a go command.
+func proxylessWarning(goproxy string) string {
+	if !proxyless(goproxy) {
+		return ""
+	}
+	return fmt.Sprintf("Warning: GOPROXY is %q, which names no module proxy.\n"+
+		"  gomodbb fetches source through a proxy and refuses a version control\n"+
+		"  tool, so only modules already in the module cache can be found.\n"+
+		"  Unset GOPROXY to use the go command's default, or set it to a proxy.",
+		goproxy)
+}
+
+// warnIfProxyless warns when GOPROXY leaves gomodbb nowhere to fetch from.
+//
+// gomodbb fetches through a module proxy, and GOVCS refuses a version control
+// tool, so a GOPROXY of "direct" or "off" permits nothing. What the go
+// command then reports is a VCS policy error naming neither gomodbb nor
+// GOPROXY, which is a confusing place to start looking:
+//
+//	go: ...: GOVCS disallows using git for public github.com/u-root/u-root
+//
+// It warns rather than refusing, because the build can still succeed: a
+// module already in the module cache is served from there without a proxy
+// being consulted at all, which is how an offline build works.
+//
+// GOPROXY is read with `go env` rather than from the environment, so that a
+// value set with `go env -w` is seen too, and so that an unset GOPROXY
+// resolves to the default the fetch will really use.
+func warnIfProxyless(l *log.Logger, env *golang.Environ) {
+	out, err := goCmd(env, "env", "GOPROXY").Output()
+	if err != nil {
+		// The fetch reports anything that matters, so failing to look
+		// this up is not worth stopping for.
+		return
+	}
+
+	if w := proxylessWarning(strings.TrimSpace(string(out))); w != "" {
+		l.Print(w)
+	}
+}
+
 // fetch writes a module requiring everything the patterns name, leaving the
 // source in the module cache and the chosen versions in its go.mod.
 func fetch(l *log.Logger, env *golang.Environ, modDir string, patterns []pattern) error {
@@ -268,6 +346,7 @@ func fetch(l *log.Logger, env *golang.Environ, modDir string, patterns []pattern
 	// resolves all of them against a single build list. Fetching them
 	// separately lets an earlier pattern pick a dependency version that a
 	// later one then has to upgrade, doing the work twice.
+	warnIfProxyless(l, env)
 	l.Printf("Fetching %s", strings.Join(specs, " "))
 	cmd := goCmd(env, "get", specs...)
 	if out, err := cmd.CombinedOutput(); err != nil {
