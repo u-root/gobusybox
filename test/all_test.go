@@ -120,6 +120,22 @@ func fixtures(t *testing.T) []fixture {
 				"helloworld": "hello world\n",
 			},
 		},
+		{
+			// The only fixture whose libraries have anything to
+			// defer: an init and a package-level variable in each,
+			// whose effects reach the command's output. Nothing
+			// else here has either, so nothing else can tell a
+			// library init that ran from one that was skipped.
+			testname: "library-init",
+			wd:       filepath.Join(wd, "libinit"),
+			cmds:     []string{"./cmd/first", "./cmd/second"},
+			want: map[string]string{
+				"first": "lonely.init(saw lonely.var) shared.init(saw shared.var)\n",
+				"second": "dependent.var(saw shared.init(saw shared.var)) " +
+					"dependent.init(saw shared.init(saw shared.var)) " +
+					"shared.init(saw shared.var)\n",
+			},
+		},
 	}
 }
 

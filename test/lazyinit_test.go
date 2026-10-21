@@ -32,6 +32,10 @@ import (
 // being rewritten. The check for it has to exist, and has to have been shown
 // to fail when it should, before there is anything for it to catch. Turning
 // it on is then a one-line change to a test that is already trusted.
+//
+// For that to mean anything, some fixture's libraries have to have
+// initialization whose effect reaches the command's output. Only libinit
+// does; see compareInitTrace for why the init trace cannot stand in for it.
 var lazyInitArgs []string
 
 // commandRun is what one command did in one busybox: what it printed, how it
@@ -158,15 +162,26 @@ func compareRuns(t *testing.T, cmdName string, baseline, candidate commandRun) {
 }
 
 // compareInitTrace reports any difference between which packages ran their
-// init in the two builds.
+// init at program start.
 //
 // It demands they be identical, which holds while both builds are made the
-// same way. Step 4 of the lazy init work is what makes them differ on
-// purpose: a deferred library init no longer runs at program start, so the
-// candidate's list becomes a subset of the baseline's. This is the one place
-// that then has to be relaxed, and relaxing it means allowing a subset --
-// never allowing a package the baseline did not run, which would mean the
-// rewrite had added initialisation rather than deferred it.
+// same way. Step 4 of the lazy init work makes them differ on purpose: a
+// deferred library init no longer runs at program start, so the candidate's
+// list becomes a subset of the baseline's, and this is the one place that
+// then has to be relaxed.
+//
+// Relaxing it to allow a subset is worth less than it looks, and must not be
+// mistaken for the guard. GODEBUG=inittrace=1 reports what the runtime ran
+// before main, so a library init that has become a function the command calls
+// is absent from the trace whether the command called it or silently skipped
+// it. A subset check cannot tell those apart, and the silent skip is the
+// failure this whole test exists to catch.
+//
+// What catches it is the output comparison, and only if some library's
+// initialization reaches the output. That is what the libinit fixture is for.
+// The trace is worth comparing anyway, because a package appearing that the
+// baseline never ran means the rewrite added initialization rather than
+// deferring it, which no output check would notice.
 func compareInitTrace(t *testing.T, cmdName string, baseline, candidate commandRun) {
 	t.Helper()
 
@@ -294,11 +309,31 @@ func TestLazyInitDifferentialGomodbb(t *testing.T) {
 	baseline := build("bb-baseline", nil)
 	candidate := build("bb-lazy", lazyInitArgs)
 
-	// echo rather than ls: its output depends on nothing outside the
-	// process, so a difference between the two builds is the rewrite and
-	// not the directory they happened to run in. Dispatching echo still
-	// runs every package's init, which is the whole complaint.
+	// A directory of known contents, so that ls prints the same thing
+	// whichever build ran it.
+	lsDir := filepath.Join(dir, "lsdir")
+	if err := os.MkdirAll(lsDir, 0o755); err != nil {
+		t.Fatalf("Could not create a directory for ls: %v", err)
+	}
+	for _, name := range []string{"alpha", "beta"} {
+		if err := os.WriteFile(filepath.Join(lsDir, name), nil, 0o644); err != nil {
+			t.Fatalf("Could not create a file for ls: %v", err)
+		}
+	}
+
+	// echo first, because its output depends on nothing outside the
+	// process, so a difference is the rewrite and not the environment.
+	//
+	// ls as well, though, and not only because it is in the busybox: it is
+	// the command here whose libraries -- pflag, go-humanize, u-root's own
+	// pkg/ls -- have initialization worth deferring, and a command that is
+	// built but never dispatched is one whose deferred init is never
+	// called. Running only echo would leave exactly the interesting half
+	// of this busybox unexercised.
 	compareRuns(t, "echo",
 		runCommand(t, baseline, "echo", "hello"),
 		runCommand(t, candidate, "echo", "hello"))
+	compareRuns(t, "ls",
+		runCommand(t, baseline, "ls", lsDir),
+		runCommand(t, candidate, "ls", lsDir))
 }
