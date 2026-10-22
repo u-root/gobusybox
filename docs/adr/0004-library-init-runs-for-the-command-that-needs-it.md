@@ -1,0 +1,200 @@
+# A library's init runs for the command that needs it
+
+Go Busybox rewrites commands and copies the packages they import verbatim. A
+copied package keeps its `init` and its initialised package-level variables, so
+the go tool runs them at program start, for every command in the busybox,
+whether or not the command being dispatched imports that package. Only the
+command's own initializers are deferred, by the rewrite that produces
+`registeredInit`.
+
+That is wasted work in proportion to how little the busybox's packages are
+shared, and they are shared far less than one might guess. In the 120-command
+u-root busybox, of 228 library packages, **none is reached by every command**,
+one is reached by more than half, and **125 (55%) are reached by exactly one
+command**. The cost is paid by all 120.
+
+It is worst when a heavy package enters the busybox. Adding a single
+grpc-serving command to a busybox holding three commands that print a string
+changes what one of those three does before reaching its own `main`:
+
+| running a `fmt.Println` command | without the grpc command | with it |
+|---|---|---|
+| packages running `init` | 26 | 183 |
+| `init` clock | 0.10 ms | 1.12 ms |
+| allocated during `init` | 2.9 KB | 368 KB |
+
+Go Busybox will therefore rewrite library packages as well as commands, so that
+a library's `init` becomes an ordinary function call that the dispatched
+command makes, and a command initialises nothing it does not import.
+
+## How
+
+Each rewritten library gains one exported hook, named through the same
+collision check that picks `registeredMain`. The hook calls the hooks of the
+package's **direct imports** first, then runs that package's own
+initialization, and a generated package-level boolean makes the second and
+later calls return immediately. The generated tree writes a `bbinit.go` beside
+each rewritten command calling the hooks of the command's own direct imports,
+and the recursion reaches the rest.
+
+It has to be direct imports rather than a flat list of the whole graph,
+because `internal/` visibility is enforced inside `vendor/` as everywhere
+else. A command calling every package in its graph would have to import every
+package in its graph, and fails as soon as one of them is another module's
+`internal/` package:
+
+```
+vendor/example.com/other/other.go:6:2: use of internal package
+example.com/lib/internal/hidden not allowed
+```
+
+That is not an exotic case. `google.golang.org/grpc`,
+`google.golang.org/protobuf` and `golang.org/x/net` all keep most of
+themselves under `internal/`. Calling only direct imports is legal by
+construction, since a package may always import what it already imports.
+
+The order this produces is a depth-first walk, with each package's direct
+imports taken in import path order so that two builds of one input agree. It
+puts every package after all of its imports, which is the whole of what Go
+guarantees.
+
+A package is deferred **entirely or not at all**: its hoisted package-level
+variable initializers and its `init` bodies move into the hook together, in
+the order Go would have run them. Deferring one without the other is not a
+smaller step, it is a broken one. Go finishes all of an imported package's
+initialization before the importing package's variables are initialized, so
+leaving `var x = q.Lookup()` eager while deferring `q`'s `init` runs the
+variable against a `q` that has not been initialized:
+
+```
+Go as it is:                      p.V = v
+init deferred, variable eager:    p.V = <TABLE NOT BUILT>
+```
+
+This is also what `bbinternal.Package.Rewrite` already does for commands,
+where `busyboxInit0` holds the hoisted variables and `busyboxInit1..N` the
+`init` bodies, all reached through one `registeredInit`.
+
+A package that is not rewritten keeps its `init` at program start, which
+happens before any command is dispatched and therefore before any deferred
+`init`. So a package that stays eager may not import one that does not: Go
+would run the import first, and this arrangement would run it second, against
+state the eager `init` has already read. **The set of packages left eager is
+therefore closed under imports**, and is computed as a closure rather than
+decided one package at a time. Standard library packages are never rewritten
+and are always eager, which is consistent because no standard library package
+imports a vendored one.
+
+Laziness is refused outright for any package carrying `//go:linkname` or an
+assembly file. Both can bind a symbol in another package by name, so such a
+package can be rewritten cleanly, compile, and still misbehave, because
+something reaches its state by a path that is not in the import graph. The
+refusal is static and over-broad on purpose. Anything else that defeats the
+rewrite falls back to eager and is reported at the end of the build, never
+silently.
+
+Refusing the package that carries the directive is not quite enough. The
+two-argument form, `//go:linkname local importpath.name`, names a symbol in
+another package, and that is exactly an edge the import graph does not have,
+so the closure above cannot reach it: the refused package becomes eager while
+its target stays lazy, and the eager one reads the target's state before the
+target has been initialized. **The target package of a two-argument
+`//go:linkname` therefore joins the eager roots**, and the closure runs from
+there as usual.
+
+That is completeness rather than a repair. Scanning a grpc-serving command's
+101 non-standard packages finds one two-argument pull,
+`golang.org/x/sys/unix` reaching `syscall.prlimit`, whose target is a standard
+library package and so eager already. Every other such pull in the build is in
+the standard library reaching the runtime. The rule costs nothing to state and
+the scanner has to look at the directive anyway.
+
+Importing `unsafe` is **not** on that list, though it is the obvious third
+candidate. `unsafe` lets a package do what it likes to memory it already has;
+it does not let another package reach this one without importing it, which is
+the property the import graph has to carry. Refusing it would also cost
+something, because the eager set is closed downward: for a single
+grpc-serving command, of 101 non-standard packages,
+
+| refused | eager after closure | `init` heap still recoverable |
+|---|---|---|
+| `//go:linkname`, assembly | **1** | 379 KB, 84% |
+| and `unsafe` as well | **23** | 343 KB, 76% |
+
+The count is the dramatic number and the heap is the honest one. Refusing
+`unsafe` would make 22 more packages eager but cost only 36 KB of the
+recoverable heap, because the packages it drags in are small:
+`protobuf/internal/impl` allocates 288 bytes during `init`, and most of the
+loss is one package, `protobuf/encoding/protowire`, at 33 KB. So this is a
+decision worth 8 points of the heap, taken because the rule is wrong rather
+than because it is expensive.
+
+## What this actually recovers
+
+For that same grpc-serving command, 141 packages run `init`, allocating
+450 KB in 1.18 ms, and they divide as:
+
+| | packages | `init` heap | share |
+|---|---|---|---|
+| deferrable | 53 | 379 KB | **84%** |
+| refused, so eager | 1 | 48 B | 0% |
+| standard library, always eager | 87 | 71 KB | 16% |
+
+So grpc itself is deferrable in full: all 54 `google.golang.org/grpc`
+packages and all 33 `google.golang.org/protobuf` packages come out lazy, and
+the only non-standard package the rules refuse is `golang.org/x/sys/unix`,
+which has both a `//go:linkname` and an assembly file and allocates 48 bytes.
+The floor is the standard library, which is never rewritten.
+
+The largest single deferrable allocators are
+`protobuf/reflect/protodesc` at 135 KB and `protobuf/types/descriptorpb` at
+74 KB -- between them nearly half of everything recoverable, and paid today by
+every command in the busybox whether or not it has ever heard of protobuf.
+
+## Consequences
+
+- `GLOSSARY.md`'s **Rewrite** entry says "Only commands are rewritten; the
+  packages they import are copied without rewriting". That stops being true
+  and must be amended when this lands, along with new entries for the hook
+  and the eager set.
+
+- Rewriting reaches machine-written code for the first time. Commands are
+  hand-written; library packages include generated protobuf sources and other
+  output no one proofread. The type inference that hoists package-level
+  variables is where issue #9's collisions came from, and it now runs over far
+  stranger input.
+
+- The blast radius of a rewrite defect grows from one command to every command
+  importing the affected library. A differential check — build each fixture
+  busybox with and without laziness and compare output, exit status and
+  `GODEBUG=inittrace=1` — is written before any library is rewritten, and runs
+  in the unit suite so that it guards every pull request rather than only the
+  `-external` runs. The trace is the weaker half of that check: a deferred
+  `init` has become an ordinary call and does not appear in it at all, so only
+  the output can distinguish one that ran from one that was skipped. Some
+  fixture's libraries therefore have to have initialization that reaches the
+  command's output, and until this lands none of them did.
+
+- A library now calls another library's hook, which the first draft of this
+  decision forbade. The cost is that the generated code is a graph walk rather
+  than a list, and that each rewritten package carries one generated boolean
+  of state. The benefit is that it compiles.
+
+- The capability lands staged and off by default, as `-lazy-init`, taking
+  optional package patterns. **The staging is by which packages are deferred,
+  not by which half of a package** — the patterns are the dial, and a package
+  named by them gives up its variables and its `init` together. The default
+  flips on evidence in a later release, not in the one that introduces it.
+
+- The memory claim is about heap allocated during `init`, not about the size
+  of the busybox. Adding the grpc command above grew peak RSS by 6.2 MB, of
+  which only about 365 KB is `init` heap; the rest is text the linker keeps
+  whether or not anything calls it. Deferring `init` recovers the former and
+  none of the latter.
+
+- This depends on [0003](0003-one-command-runs-per-process.md). If a busybox
+  ever dispatches twice in one process, a deferred `init` runs twice where Go
+  would have run it once, and this decision has to be revisited. The guarding
+  boolean makes that a no-op rather than a repeat, but the second command
+  would then see state the first had already mutated, which is 0003's problem
+  and not this one's.
