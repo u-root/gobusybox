@@ -44,7 +44,7 @@ var (
 	versionFlag = flag.String("v", "", "Go version for workspace file")
 )
 
-func run(dir string, args []string, paths []string) {
+func run(dir string, args []string, paths []string) error {
 	var relPaths []string
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -68,11 +68,7 @@ func run(dir string, args []string, paths []string) {
 	c := exec.Command(args[0], append(args[1:], relPaths...)...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	c.Dir = dir
-	if err := c.Run(); err != nil {
-		log.Fatalf("Exited with %v", err)
-		os.Exit(1)
-	}
-	os.Exit(0)
+	return c.Run()
 }
 
 // moduleGoVersion returns the go directive of the go.mod in dir, or "" if it
@@ -93,6 +89,12 @@ func moduleGoVersion(dir string) (string, error) {
 }
 
 func main() {
+	if err := runGoanywhere(); err != nil {
+		log.Fatalf("Exited with %v", err)
+	}
+}
+
+func runGoanywhere() error {
 	flag.Parse()
 	log.SetPrefix("[goanywhere] ")
 
@@ -122,16 +124,6 @@ func main() {
 		log.Fatalf("No modules found for %v", noModulePaths)
 	}
 
-	var dir string
-	if *tmp {
-		var err error
-		dir, err = os.MkdirTemp("", "goanywhere-")
-		if err != nil {
-			log.Fatalf("Could not create temp dir: %v", err)
-		}
-		defer os.RemoveAll(dir)
-	}
-
 	if *versionFlag == "" {
 		v, err := env.Version()
 		if err != nil {
@@ -150,14 +142,27 @@ func main() {
 	// This runs even when -v was given. An explicit version is a baseline,
 	// not a ceiling: honouring "-v 1.25" against a member declaring
 	// "go 1.26.6" would emit a workspace the go tool rejects outright.
-	for dir := range mods {
-		mv, err := moduleGoVersion(dir)
+	for mdir := range mods {
+		mv, err := moduleGoVersion(mdir)
 		if err != nil {
-			log.Fatalf("Could not read go.mod in %s: %v", dir, err)
+			log.Fatalf("Could not read go.mod in %s: %v", mdir, err)
 		}
 		if golang.CompareGoVersions(mv, *versionFlag) > 0 {
 			*versionFlag = mv
 		}
+	}
+
+	return createWorkspaceAndRun("", *tmp, *versionFlag, mods, args, paths)
+}
+
+func createWorkspaceAndRun(dir string, isTmp bool, version string, mods map[string][]string, args []string, paths []string) error {
+	if isTmp {
+		var err error
+		dir, err = os.MkdirTemp("", "goanywhere-")
+		if err != nil {
+			return fmt.Errorf("could not create temp dir: %w", err)
+		}
+		defer os.RemoveAll(dir)
 	}
 
 	tpl := `go {{.Version}}
@@ -171,18 +176,18 @@ use ({{range .Modules}}
 		Version string
 		Modules []string
 	}{
-		Version: *versionFlag,
+		Version: version,
 		Modules: maps.Keys(mods),
 	}
 	t := template.Must(template.New("tpl").Parse(tpl))
 	var b bytes.Buffer
 	if err := t.Execute(&b, vars); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := os.WriteFile(filepath.Join(dir, "go.work"), b.Bytes(), 0o644); err != nil {
-		log.Fatal(err)
+		return err
 	}
 	defer os.Remove(filepath.Join(dir, "go.work"))
 
-	run(dir, args, paths)
+	return run(dir, args, paths)
 }
