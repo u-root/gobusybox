@@ -17,15 +17,19 @@ import (
 	"strings"
 )
 
+// CompilerType is the kind of compiler an Environ builds with.
 type CompilerType int
 
 const (
+	// CompilerGo is the standard Go toolchain.
 	CompilerGo CompilerType = iota
+	// CompilerTinygo is the TinyGo toolchain.
 	CompilerTinygo
+	// CompilerUnkown is a compiler this package does not know.
 	CompilerUnkown
 )
 
-// Cached information about the compiler used.
+// Compiler is the cached information about the compiler in use.
 type Compiler struct {
 	Path          string
 	Identifier    string // e.g. 'tinygo' or 'go'
@@ -36,7 +40,8 @@ type Compiler struct {
 	IsInit        bool   // CompilerInit() succeeded
 }
 
-// Map the compiler's identifier ("tinygo" or "go") to enum.
+// CompilerTypeFromString maps the compiler's identifier ("tinygo" or "go") to
+// a CompilerType.
 func CompilerTypeFromString(name string) CompilerType {
 	val, ok := map[string]CompilerType{
 		"go":     CompilerGo,
@@ -48,7 +53,7 @@ func CompilerTypeFromString(name string) CompilerType {
 	return CompilerUnkown
 }
 
-// Sets the compiler for Build() / BuildDir() functions.
+// WithCompiler sets the compiler that the Build() / BuildDir() functions use.
 func WithCompiler(p string) Opt {
 	return func(c *Environ) {
 		c.Compiler.Path = p
@@ -141,7 +146,8 @@ func versionSyntaxError(v string) error {
 	return fmt.Errorf("go-compiler version %q: %w", v, ErrVersionSyntax)
 }
 
-// Runs compilerCmd("version") and parse/caches output to c.Compiler.
+// CompilerInit runs compilerCmd("version") and parses and caches its output in
+// c.Compiler.
 func (c *Environ) CompilerInit() error {
 	if c.Compiler.IsInit {
 		return nil
@@ -218,8 +224,8 @@ func (c *Environ) CompilerInit() error {
 	return nil
 }
 
-// Returns the Go version string that runtime.Version would return for the Go
-// compiler in this environ.
+// Version returns the Go version string that runtime.Version would return for
+// the Go compiler in this environ.
 func (c *Environ) Version() (string, error) {
 	if err := c.CompilerInit(); err != nil {
 		return "", err
