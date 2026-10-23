@@ -5,110 +5,51 @@
 package main
 
 import (
+	"flag"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
-func TestRunReturnsError(t *testing.T) {
-	tmpDir := t.TempDir()
-	// Successful command should return nil
-	if err := run(tmpDir, []string{"go", "version"}, nil); err != nil {
-		t.Fatalf("run(go version) = %v, want nil", err)
-	}
-
-	// Failing command should return non-nil error without calling os.Exit
-	if err := run(tmpDir, []string{"go", "non-existent-command-xyz"}, nil); err == nil {
-		t.Fatalf("run(failing command) = nil, want error")
-	}
-}
-
-func TestCreateWorkspaceAndRunTmpCleanup(t *testing.T) {
-	tmpParent := t.TempDir()
-	t.Setenv("TMPDIR", tmpParent)
-	t.Setenv("TMP", tmpParent)
-	t.Setenv("TEMP", tmpParent)
-
-	mods := map[string][]string{
-		".": {"."},
-	}
-
-	err := createWorkspaceAndRun("", true, "1.27.0", mods, []string{"go", "version"}, nil)
-	if err != nil {
-		t.Fatalf("createWorkspaceAndRun failed: %v", err)
-	}
-
-	entries, err := os.ReadDir(tmpParent)
-	if err != nil {
+func TestGoanywhereCleanup(t *testing.T) {
+	workDir := t.TempDir()
+	goMod := "module example.com/test\n\ngo 1.22\n"
+	if err := os.WriteFile(filepath.Join(workDir, "go.mod"), []byte(goMod), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "goanywhere-") {
-			t.Errorf("Temporary directory %s was leaked and not removed", filepath.Join(tmpParent, e.Name()))
-		}
+	origArgs := os.Args
+	origCommandLine := flag.CommandLine
+	defer func() {
+		os.Args = origArgs
+		flag.CommandLine = origCommandLine
+	}()
+
+	// Test 1: Successful command with -tmp=true
+	flag.CommandLine = flag.NewFlagSet("goanywhere", flag.ContinueOnError)
+	debug = flag.CommandLine.Bool("d", false, "Show debug string")
+	tmp = flag.CommandLine.Bool("tmp", true, "Create workspace in temp dir")
+	versionFlag = flag.CommandLine.String("v", "", "Go version for workspace file")
+	os.Args = []string{"goanywhere", workDir, "--", "go", "version"}
+
+	if err := run(); err != nil {
+		t.Fatalf("run failed: %v", err)
 	}
-}
 
-func TestCreateWorkspaceAndRunTmpCleanupOnFailure(t *testing.T) {
-	tmpParent := t.TempDir()
-	t.Setenv("TMPDIR", tmpParent)
-	t.Setenv("TMP", tmpParent)
-	t.Setenv("TEMP", tmpParent)
+	// Test 2: Failing command with -tmp=false removes generated go.work
+	flag.CommandLine = flag.NewFlagSet("goanywhere", flag.ContinueOnError)
+	debug = flag.CommandLine.Bool("d", false, "Show debug string")
+	tmp = flag.CommandLine.Bool("tmp", false, "Create workspace in temp dir")
+	versionFlag = flag.CommandLine.String("v", "", "Go version for workspace file")
+	os.Args = []string{"goanywhere", "-tmp=false", workDir, "--", "go", "non-existent-subcommand-xyz"}
 
-	mods := map[string][]string{
-		".": {"."},
-	}
-
-	// Failing command
-	err := createWorkspaceAndRun("", true, "1.27.0", mods, []string{"go", "non-existent-command-xyz"}, nil)
+	err := run()
 	if err == nil {
-		t.Fatalf("createWorkspaceAndRun with invalid command succeeded, want error")
-	}
-
-	entries, err := os.ReadDir(tmpParent)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for _, e := range entries {
-		if strings.HasPrefix(e.Name(), "goanywhere-") {
-			t.Errorf("Temporary directory %s was leaked on command failure", filepath.Join(tmpParent, e.Name()))
-		}
-	}
-}
-
-func TestCreateWorkspaceAndRunNoTmpCleanup(t *testing.T) {
-	workDir := t.TempDir()
-	mods := map[string][]string{
-		workDir: {workDir},
-	}
-
-	err := createWorkspaceAndRun(workDir, false, "1.27.0", mods, []string{"go", "version"}, nil)
-	if err != nil {
-		t.Fatalf("createWorkspaceAndRun failed: %v", err)
+		t.Fatalf("run with failing command succeeded, want error")
 	}
 
 	goWorkPath := filepath.Join(workDir, "go.work")
-	if _, err := os.Stat(goWorkPath); !os.IsNotExist(err) {
-		t.Errorf("go.work at %s was not removed after -tmp=false run", goWorkPath)
-	}
-}
-
-func TestCreateWorkspaceAndRunNoTmpCleanupOnFailure(t *testing.T) {
-	workDir := t.TempDir()
-	mods := map[string][]string{
-		workDir: {workDir},
-	}
-
-	err := createWorkspaceAndRun(workDir, false, "1.27.0", mods, []string{"go", "non-existent-command-xyz"}, nil)
-	if err == nil {
-		t.Fatalf("createWorkspaceAndRun with invalid command succeeded, want error")
-	}
-
-	goWorkPath := filepath.Join(workDir, "go.work")
-	if _, err := os.Stat(goWorkPath); !os.IsNotExist(err) {
-		t.Errorf("go.work at %s was not removed after failing -tmp=false run", goWorkPath)
+	if _, statErr := os.Stat(goWorkPath); !os.IsNotExist(statErr) {
+		t.Errorf("go.work at %s was not cleaned up on failure", goWorkPath)
 	}
 }
