@@ -82,6 +82,17 @@ from the type checker rather than from source order. It is the go/types
 `InitOrder`.
 _Avoid_: dependency order
 
+**Eager set**:
+The packages of a busybox whose initialization runs at program start, before
+any command is dispatched, rather than when a command that imports them is.
+It is a closure, not a per-package decision: an eager package initializes
+before every deferred one, so everything an eager package imports is eager
+too. Standard library packages are always in it, as are packages carrying
+`//go:linkname` or an assembly file, and the packages a two-argument
+`//go:linkname` names. Decided by `lazyinit.Plan`, which reports membership
+through `Eager` and the reason through `EagerReason`.
+_Avoid_: eager flag, eager list, non-lazy set
+
 **Registry**:
 The runtime map from command name to its registered init and registered main.
 Each rewritten command adds itself to the registry from a generated `init`. No
