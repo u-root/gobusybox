@@ -36,6 +36,11 @@ type fixture struct {
 	wd string
 	// extra args to makebb
 	extraArgs []string
+	// lazyInit names the library packages whose initialization the
+	// candidate build defers, by whole import path. Empty means the
+	// candidate is built exactly like the baseline, which is all a
+	// fixture with no library of its own can offer.
+	lazyInit []string
 	// command name -> expected output. A fixture that leaves this empty is
 	// built but never run, because its output is not predictable.
 	want map[string]string
@@ -89,6 +94,11 @@ func fixtures(t *testing.T) []fixture {
 			cmds:     []string{"./cmd/loghello"},
 			wd:       filepath.Join(wd, "implicitimport"),
 			want:     map[string]string{"loghello": "Log Hello\n"},
+			// A library reached through an implicit import, which
+			// is what makes hoisting its variables interesting:
+			// the type of one names a package the file never
+			// imported.
+			lazyInit: []string{"github.com/u-root/gobusybox/test/implicitimport/pkg/defaultlog"},
 		},
 		{
 			testname: "nested-modules",
@@ -103,11 +113,19 @@ func fixtures(t *testing.T) []fixture {
 				"helloworld": "test/normaldeps/mod2/hello: test/normaldeps/mod2/v2/hello\n",
 				"getppid":    fmt.Sprintf("%d\n", os.Getpid()),
 			},
+			// A library in a different module from the command,
+			// so the deferred package and its caller are vendored
+			// from two places.
+			lazyInit: []string{"github.com/u-root/gobusybox/test/normaldeps/mod2/v2/pkg/hello"},
 		},
 		{
 			testname: "import-name-conflict",
 			wd:       filepath.Join(wd, "nameconflict"),
 			cmds:     []string{"./cmd/nameconflict"},
+			// The fixture exists because a generated import can
+			// collide with one already there, which is exactly
+			// what the hook file adds.
+			lazyInit: []string{"github.com/u-root/gobusybox/test/nameconflict/pkg/defaultlog"},
 		},
 		{
 			testname: "diamond-module-dependency",
@@ -119,6 +137,11 @@ func fixtures(t *testing.T) []fixture {
 					"test/diamonddep/mod2/exthello: test/diamonddep/mod2/exthello: test/diamonddep/mod1/hello and test/diamonddep/mod3/hello\n",
 				"helloworld": "hello world\n",
 			},
+			// The bottom of the diamond: hellowithdep reaches it
+			// directly and again through mod2/exthello, so a hook
+			// that lost its once-only guard would run this
+			// package's initialization twice.
+			lazyInit: []string{"github.com/u-root/gobusybox/test/diamonddep/mod1/pkg/hello"},
 		},
 		{
 			// The only fixture whose libraries have anything to
@@ -129,6 +152,11 @@ func fixtures(t *testing.T) []fixture {
 			testname: "library-init",
 			wd:       filepath.Join(wd, "libinit"),
 			cmds:     []string{"./cmd/first", "./cmd/second"},
+			// lonely is the package second never imports and pays
+			// for anyway, which is what this whole fixture is
+			// about. TestADeferredInitLeavesTheStartupTrace asserts
+			// what deferring it does, on both commands.
+			lazyInit: []string{"github.com/u-root/gobusybox/test/libinit/pkg/lonely"},
 			want: map[string]string{
 				"first": "lonely.init(saw lonely.var) shared.init(saw shared.var)\n",
 				"second": "dependent.var(saw shared.init(saw shared.var)) " +

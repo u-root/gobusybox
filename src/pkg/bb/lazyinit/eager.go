@@ -36,7 +36,11 @@ type Plan struct {
 
 // New decides, for the busybox built from cmds, which packages initialize at
 // program start.
-func New(cmds []*packages.Package) *Plan {
+//
+// With no options every package that can be deferred is, which is what the
+// busybox could recover rather than what any particular build moves. A build
+// passes DeferOnly to narrow that to the packages it was asked for.
+func New(cmds []*packages.Package, opts ...Option) *Plan {
 	p := &Plan{
 		pkgs:  map[string]*packages.Package{},
 		eager: map[string]string{},
@@ -88,6 +92,12 @@ func New(cmds []*packages.Package) *Plan {
 	walked := map[string]bool{}
 	for path := range roots {
 		p.markEager(path, walked)
+	}
+
+	// Narrowing runs last, on a settled eager set. DeferOnly needs to know
+	// which packages could be deferred before it can say which of them are.
+	for _, opt := range opts {
+		opt(p)
 	}
 	return p
 }

@@ -21,6 +21,11 @@
 // callable package functions. E.g. `main` becomes `registeredMain`, each
 // `init` becomes a numbered `busyboxInitN`, and global variable assignments
 // are moved into their own `busyboxInitN`.
+//
+// Opts.LazyInit extends that to named library packages, which keep their own
+// name and import path and gain an exported hook that the commands importing
+// them call. See docs/adr/0004 and the README's Library Rewrite
+// section.
 package bb
 
 import (
@@ -163,6 +168,22 @@ type Opts struct {
 	// Generate the tree but don't build it. This is useful for systems
 	// like Tamago which have their own way of building.
 	GenerateOnly bool
+
+	// LazyInit names the library packages whose initialization is deferred
+	// to the commands that import them, by whole import path.
+	//
+	// Empty means every package initializes at program start, as it always
+	// has, and nothing below the command level is rewritten. A package
+	// named here gives up its package-level variables and its init
+	// together, and so does every package that imports it: an eager
+	// package initializes before any deferred one and so may not import
+	// one.
+	//
+	// A path naming no package in the busybox, or one that cannot be
+	// deferred, fails the build rather than being skipped. Asking for
+	// laziness and silently not getting it is the failure this is hardest
+	// to notice.
+	LazyInit []string
 }
 
 // BuildBusybox builds a busybox of many Go commands. opts contains both the
@@ -264,17 +285,35 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return err
 	}
 
+	// Which packages wait for a command that imports them, and which
+	// initialize at program start as they always have.
+	plan, err := planInit(cmds, opts.LazyInit)
+	if err != nil {
+		return err
+	}
+
 	// Every package written into vendor/, keyed by the import path it is
 	// written at. go.mod and vendor/modules.txt are derived from this same
 	// map, so the manifest cannot drift from what is on disk.
 	vendored := make(map[string]*packages.Package)
+
+	// The hook of every deferred package, by import path. A hook's name is
+	// chosen against the package's own scope, so it is not predictable
+	// from the path and has to be recorded as each package is rewritten.
+	hooks := make(map[string]bbinternal.Hook)
+
+	// Deferred libraries before the commands that call them, so that every
+	// hook a command names has a name by the time the command is written.
+	if err := rewriteLibraries(vendorDir, cmds, plan, vendored, hooks); err != nil {
+		return err
+	}
 
 	// List of packages to import in the real main file.
 	var bbImports []string
 	// Rewrite commands to packages.
 	for _, cmd := range cmds {
 		ipath := cmd.Pkg.PkgPath
-		if err := cmd.Rewrite(filepath.Join(vendorDir, ipath), bbMainImportPath); err != nil {
+		if err := cmd.Rewrite(filepath.Join(vendorDir, ipath), bbMainImportPath, hookCalls(plan, hooks, ipath)); err != nil {
 			return fmt.Errorf("rewriting command %q failed: %v", cmd.Pkg.PkgPath, err)
 		}
 		vendored[ipath] = cmd.Pkg
@@ -286,9 +325,11 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 		return fmt.Errorf("collecting and putting dependencies in place failed: %v", err)
 	}
 
-	if err := writeBBMain(tmpDir, bbImports); err != nil {
+	if err := writeBBMain(tmpDir, bbImports, len(hooks) > 0); err != nil {
 		return fmt.Errorf("failed to write main.go: %v", err)
 	}
+
+	reportLazyInit(l, plan, hooks)
 
 	version, err := opts.Env.Version()
 	if err != nil {
@@ -342,12 +383,22 @@ func (e *ErrBuild) Error() string {
 // They are taken from ./bbmain/register.go and ./bbmain/cmd/main.go, but they
 // do not retain their original import paths, because the main command must be
 // in a module that doesn't conflict with any bb commands. See bbModulePath.
-func writeBBMain(bbDir string, bbImports []string) error {
+//
+// lazy arms the flag register.go declares but never sets, which is what makes
+// it refuse a second dispatched command. That refusal is only correct once
+// initialization has been deferred: while every package initializes before
+// main, a second command runs exactly the init Go would have run for it.
+func writeBBMain(bbDir string, bbImports []string, lazy bool) error {
 	if err := os.MkdirAll(filepath.Join(bbDir, "pkg/bbmain"), 0755); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join(bbDir, "pkg/bbmain/register.go"), bbRegisterSource, 0644); err != nil {
 		return err
+	}
+	if lazy {
+		if err := os.WriteFile(filepath.Join(bbDir, "pkg/bbmain/lazyinit.go"), []byte(lazyInitArmSource), 0644); err != nil {
+			return err
+		}
 	}
 	if err := os.WriteFile(filepath.Join(bbDir, "main.go"), bbMainSource, 0644); err != nil {
 		return err
