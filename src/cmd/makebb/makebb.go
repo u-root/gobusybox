@@ -14,6 +14,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
+	"github.com/u-root/gobusybox/src/pkg/uflag"
 )
 
 var (
@@ -21,9 +22,16 @@ var (
 	genDir     = flag.String("gen-dir", "", "Directory to generate source in")
 	genOnly    = flag.Bool("g", false, "Generate but do not build binaries")
 	keep       = flag.Bool("k", false, "Keep generated source temporary directory")
+
+	// lazyInit is repeatable rather than a comma-separated list, because
+	// the other list-valued flags here are, and because a package that is
+	// not deferred should be named in an error rather than guessed at.
+	lazyInit uflag.Strings
 )
 
 func main() {
+	flag.Var(&lazyInit, "lazy-init", "Import path of a library whose init runs for the commands that import it, rather than at program start. Repeatable. Experimental.")
+
 	bopts := &golang.BuildOpts{}
 	bopts.RegisterFlags(flag.CommandLine)
 	env := golang.Default()
@@ -69,6 +77,7 @@ func main() {
 		BinaryPath:   o,
 		GoBuildOpts:  bopts,
 		GenerateOnly: *genOnly,
+		LazyInit:     lazyInit,
 	}
 	if err := bb.BuildBusybox(l, opts); err != nil {
 		l.Fatalf("Preserving bb generated source directory at %s due to error: %v", tmpDir, err)

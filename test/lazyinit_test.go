@@ -16,27 +16,27 @@ import (
 	"github.com/u-root/gobusybox/src/pkg/golang"
 )
 
-// lazyInitArgs are the extra makebb arguments that build the candidate
-// busybox -- the one whose behaviour has to match the baseline's.
+// lazyInitFlags turns a list of import paths into the makebb arguments that
+// defer them.
 //
-// It is empty, because the flag it will hold does not exist yet. Deferring a
-// library's init to the command that needs it lands as -lazy-init, off by
-// default, and it is step 4 of that work which first produces a busybox
-// differing from its baseline. Until then both builds are made the same way
-// and this test compares a build against itself.
+// Repeated rather than comma-separated, because that is how makebb's other
+// list-valued flags read and an import path is the kind of thing someone
+// pastes one of at a time.
+func lazyInitFlags(paths []string) []string {
+	var args []string
+	for _, path := range paths {
+		args = append(args, "-lazy-init", path)
+	}
+	return args
+}
+
+// lazyInitPaths is what the gomodbb arm defers.
 //
-// That is the point of landing it now. The failure mode the rewrite
-// introduces is a library whose init silently stops running, which produces
-// no failure until something reads state that was never set, and whose blast
-// radius is every command importing that library rather than the one command
-// being rewritten. The check for it has to exist, and has to have been shown
-// to fail when it should, before there is anything for it to catch. Turning
-// it on is then a one-line change to a test that is already trusted.
-//
-// For that to mean anything, some fixture's libraries have to have
-// initialization whose effect reaches the command's output. Only libinit
-// does; see compareInitTrace for why the init trace cannot stand in for it.
-var lazyInitArgs []string
+// u-root's own pkg/ls rather than one of ls's third-party imports: it is
+// reached by exactly one command, which is the shape 125 of the 228 library
+// packages in the 120-command u-root busybox have, and it belongs to the
+// module the build is about rather than to something vendored underneath it.
+var lazyInitPaths = []string{"github.com/u-root/u-root/pkg/ls"}
 
 // commandRun is what one command did in one busybox: what it printed, how it
 // exited, and which packages ran their init before it reached its own main.
@@ -162,33 +162,49 @@ func compareRuns(t *testing.T, cmdName string, baseline, candidate commandRun) {
 }
 
 // compareInitTrace reports any difference between which packages ran their
-// init at program start.
+// init at program start that deferring initialization does not explain.
 //
-// It demands they be identical, which holds while both builds are made the
-// same way. Step 4 of the lazy init work makes them differ on purpose: a
-// deferred library init no longer runs at program start, so the candidate's
-// list becomes a subset of the baseline's, and this is the one place that
-// then has to be relaxed.
+// The candidate must be the baseline with entries removed and none added or
+// moved. Deferring a library's init takes it out of the trace; nothing else
+// about this rewrite may touch it.
 //
-// Relaxing it to allow a subset is worth less than it looks, and must not be
-// mistaken for the guard. GODEBUG=inittrace=1 reports what the runtime ran
-// before main, so a library init that has become a function the command calls
-// is absent from the trace whether the command called it or silently skipped
-// it. A subset check cannot tell those apart, and the silent skip is the
-// failure this whole test exists to catch.
+// What that does *not* catch is the failure this whole test exists for.
+// GODEBUG=inittrace=1 reports what the runtime ran before main, so a library
+// init that has become a function the command calls is absent from the trace
+// whether the command called it or silently skipped it. The two are
+// indistinguishable here.
 //
 // What catches it is the output comparison, and only if some library's
-// initialization reaches the output. That is what the libinit fixture is for.
-// The trace is worth comparing anyway, because a package appearing that the
-// baseline never ran means the rewrite added initialization rather than
-// deferring it, which no output check would notice.
+// initialization reaches the output. That is what the libinit fixture is for,
+// and TestADeferredInitLeavesTheStartupTrace is where both halves are stated
+// as one assertion. The trace is worth comparing anyway, because a package
+// appearing that the baseline never ran means the rewrite added
+// initialization rather than deferring it, which no output check would
+// notice.
 func compareInitTrace(t *testing.T, cmdName string, baseline, candidate commandRun) {
 	t.Helper()
 
-	if !slices.Equal(baseline.initPackages, candidate.initPackages) {
-		t.Errorf("Packages running init for %s differ between the two builds:\n%s",
-			cmdName, diffPackages(baseline.initPackages, candidate.initPackages))
+	if isSubsequence(candidate.initPackages, baseline.initPackages) {
+		return
 	}
+	t.Errorf("Packages running init for %s differ between the two builds by more than deferral:\n%s",
+		cmdName, diffPackages(baseline.initPackages, candidate.initPackages))
+}
+
+// isSubsequence reports whether all of short appears in long, in that order.
+//
+// A subsequence rather than a subset, because deferring a package removes it
+// from the trace and leaves the order of everything else alone. Asserting the
+// weaker property would let a rewrite reorder the packages that still
+// initialize at program start without anything noticing.
+func isSubsequence(short, long []string) bool {
+	i := 0
+	for _, pkg := range long {
+		if i < len(short) && short[i] == pkg {
+			i++
+		}
+	}
+	return i == len(short)
 }
 
 // diffPackages describes how two package lists differ, as the entries only
@@ -243,7 +259,7 @@ func TestLazyInitDifferential(t *testing.T) {
 
 			dir := t.TempDir()
 			baseline := buildBusybox(t, mkbb, dir, "bb-baseline", tt, nil)
-			candidate := buildBusybox(t, mkbb, dir, "bb-lazy", tt, lazyInitArgs)
+			candidate := buildBusybox(t, mkbb, dir, "bb-lazy", tt, lazyInitFlags(tt.lazyInit))
 
 			// A fixture with no expected output is built both ways but
 			// never run: nested-modules holds commands this host may not
@@ -307,7 +323,7 @@ func TestLazyInitDifferentialGomodbb(t *testing.T) {
 	}
 
 	baseline := build("bb-baseline", nil)
-	candidate := build("bb-lazy", lazyInitArgs)
+	candidate := build("bb-lazy", lazyInitFlags(lazyInitPaths))
 
 	// A directory of known contents, so that ls prints the same thing
 	// whichever build ran it.
@@ -336,4 +352,179 @@ func TestLazyInitDifferentialGomodbb(t *testing.T) {
 	compareRuns(t, "ls",
 		runCommand(t, baseline, "ls", lsDir),
 		runCommand(t, candidate, "ls", lsDir))
+}
+
+// fixtureNamed returns the fixture with this testname, so that a test about
+// one fixture reads its build configuration from the one list rather than
+// repeating it and drifting from it.
+func fixtureNamed(t *testing.T, name string) fixture {
+	t.Helper()
+
+	for _, f := range fixtures(t) {
+		if f.testname == name {
+			return f
+		}
+	}
+	t.Fatalf("No fixture named %q", name)
+	return fixture{}
+}
+
+// TestADeferredInitLeavesTheStartupTrace is the guard on -lazy-init actually
+// doing something, and on it not doing too much. Both halves are needed and
+// neither is a guard alone.
+//
+// The first half is that lonely stops initializing at program start for a
+// command that never imports it. Without it, a -lazy-init that quietly
+// deferred nothing would pass every other check here:
+// TestLazyInitDifferential compares a candidate against a baseline, and a
+// candidate identical to its baseline agrees with it on everything.
+//
+// The second half is that first, which does import lonely, still prints what
+// lonely's initialization left behind. A deferred init disappears from the
+// trace whether it was called or silently skipped, so the first half alone is
+// also satisfied by a rewrite that dropped the initialization entirely --
+// which is the failure with the largest blast radius this change can have.
+//
+// Measured before it was written, so it is known not to be vacuous:
+//
+//	$ makebb -o bb ./cmd/first ./cmd/second && GODEBUG=inittrace=1 ./bb second
+//	init .../test/libinit/pkg/lonely @5.3 ms, 0.012 ms clock, 32 bytes, 1 allocs
+//
+// second never imports lonely and pays for it anyway.
+func TestADeferredInitLeavesTheStartupTrace(t *testing.T) {
+	const lonely = "github.com/u-root/gobusybox/test/libinit/pkg/lonely"
+
+	f := fixtureNamed(t, "library-init")
+	if !slices.Contains(f.lazyInit, lonely) {
+		t.Fatalf("The library-init fixture defers %v, and this test is about %s", f.lazyInit, lonely)
+	}
+
+	mkbb := buildTool(t, "makebb")
+	dir := t.TempDir()
+	baseline := buildBusybox(t, mkbb, dir, "bb-baseline", f, nil)
+	candidate := buildBusybox(t, mkbb, dir, "bb-lazy", f, lazyInitFlags(f.lazyInit))
+
+	// second does not import lonely, so deferring lonely takes it out of
+	// what second initializes.
+	base := runCommand(t, baseline, "second")
+	cand := runCommand(t, candidate, "second")
+	if !slices.Contains(base.initPackages, lonely) {
+		t.Errorf("second did not run %s's init even in the baseline, so deferring it proves nothing.\nPackages: %v",
+			lonely, base.initPackages)
+	}
+	if slices.Contains(cand.initPackages, lonely) {
+		t.Errorf("second still runs %s's init at program start with -lazy-init, so nothing was deferred", lonely)
+	}
+
+	// first does import lonely, so lonely's init still has to run -- now
+	// as a call first makes rather than before main. Only the output can
+	// tell that from its never having run.
+	const ran = "lonely.init(saw lonely.var)"
+	got := runCommand(t, candidate, "first")
+	if !strings.Contains(got.output, ran) {
+		t.Errorf("first printed %q, which does not contain %q: a deferred init must still run for a command that imports it",
+			got.output, ran)
+	}
+	if slices.Contains(got.initPackages, lonely) {
+		t.Errorf("first runs %s's init at program start with -lazy-init, so it was not deferred for the command that needs it either", lonely)
+	}
+}
+
+// TestLazyInitRefusesAPackageItCannotDefer checks that naming a package that
+// does not move fails the build.
+//
+// A silent no-op is the failure mode this work is least able to notice: every
+// comparison in this file is between a candidate and a baseline, and a
+// candidate that deferred nothing agrees with its baseline perfectly.
+func TestLazyInitRefusesAPackageItCannotDefer(t *testing.T) {
+	mkbb := buildTool(t, "makebb")
+	f := fixtureNamed(t, "library-init")
+	dir := t.TempDir()
+
+	for _, tt := range []struct {
+		name string
+		path string
+		want string
+	}{
+		{
+			name: "a package no command imports",
+			path: "github.com/u-root/gobusybox/test/libinit/pkg/nosuchthing",
+			want: "is not imported by any command in this busybox",
+		},
+		{
+			name: "the standard library",
+			path: "fmt",
+			want: "is a standard library package",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"-o", filepath.Join(dir, "bb-"+t.Name())}, f.extraArgs...)
+			args = append(args, "-lazy-init", tt.path)
+			args = append(args, f.cmds...)
+
+			cmd := exec.Command(mkbb, args...)
+			cmd.Dir = f.wd
+			cmd.Env = append(os.Environ(), "GO111MODULE=on")
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("Building with -lazy-init %s succeeded, want a refusal:\n%s", tt.path, out)
+			}
+			if !strings.Contains(string(out), tt.want) {
+				t.Errorf("Building with -lazy-init %s said:\n%s\nwant a message containing %q", tt.path, out, tt.want)
+			}
+		})
+	}
+}
+
+// TestDeferringArmsTheOneCommandGuard checks that a busybox whose libraries
+// initialize lazily is also one that refuses to dispatch twice.
+//
+// bbmain's refusal is gated on a flag that register.go declares and never
+// sets, because register.go is copied verbatim into every generated tree and
+// the refusal is only correct once initialization has been deferred: while
+// every package initializes before main, a second command runs exactly the
+// init Go would have run for it. Arming the flag is a generated file beside
+// it, and nothing else in this suite observes whether it was written.
+//
+// It is checked by reading the generated tree rather than by dispatching
+// twice, because the generated main program only ever calls Run a second time
+// on a name it did not recognise, which returns before reaching the guard. A
+// busybox that dispatches twice for real has to be written on purpose, and
+// there is none here.
+func TestDeferringArmsTheOneCommandGuard(t *testing.T) {
+	mkbb := buildTool(t, "makebb")
+	f := fixtureNamed(t, "library-init")
+
+	generate := func(name string, extra []string) string {
+		dir := filepath.Join(t.TempDir(), name)
+		args := append([]string{"-g", "-gen-dir", dir}, f.extraArgs...)
+		args = append(args, extra...)
+		args = append(args, f.cmds...)
+
+		t.Logf("Run: (cd %s && %s %s)", f.wd, mkbb, strings.Join(args, " "))
+		cmd := exec.Command(mkbb, args...)
+		cmd.Dir = f.wd
+		cmd.Env = append(os.Environ(), "GO111MODULE=on")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("Could not generate the %s tree: %v\n%s", name, err, out)
+		}
+		return dir
+	}
+
+	armed := filepath.Join(generate("lazy", lazyInitFlags(f.lazyInit)), "pkg", "bbmain", "lazyinit.go")
+	src, err := os.ReadFile(armed)
+	if err != nil {
+		t.Fatalf("A busybox that defers initialization did not arm bbmain's guard: %v", err)
+	}
+	if !strings.Contains(string(src), "lazyInit = true") {
+		t.Errorf("%s does not set lazyInit:\n%s", armed, src)
+	}
+
+	// And a busybox that defers nothing is left exactly as it was, so
+	// that nothing about dispatch changes for builds that did not ask for
+	// any of this.
+	unarmed := filepath.Join(generate("baseline", nil), "pkg", "bbmain", "lazyinit.go")
+	if _, err := os.Stat(unarmed); !os.IsNotExist(err) {
+		t.Errorf("A busybox that defers nothing armed bbmain's guard anyway (%v)", err)
+	}
 }
