@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -854,5 +855,116 @@ func TestNewPackagesAcceptsAnOldEnoughGraph(t *testing.T) {
 	}
 	if len(pkgs) != 1 {
 		t.Fatalf("NewPackages returned %d packages, want 1", len(pkgs))
+	}
+}
+
+// TestIsGlobAgreesWithPathMatch pins the predicate to the only thing that can
+// make it right: whether path.Match, which both callers go on to use, reads
+// the pattern as something other than the literal it spells.
+//
+// A literal selects exactly itself. Anything else can be caught out in one of
+// two ways -- it selects a path it does not spell, or path.Match refuses it
+// outright -- and every case below names which, so that the table cannot
+// claim a glob without showing one.
+func TestIsGlobAgreesWithPathMatch(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		in   string
+		want bool
+		// selects is a path this pattern matches. For a literal that is
+		// the pattern itself, which is the whole of what a literal
+		// matches; for a glob it must be some other path, which is what
+		// makes the case a witness rather than a restatement.
+		selects string
+		// badPattern says path.Match refuses this pattern. That is proof
+		// enough that it is not a literal, so selects goes unused.
+		badPattern bool
+	}{
+		{
+			name:    "a plain package path is a literal",
+			in:      "github.com/u-root/u-root/cmds/core/ls",
+			want:    false,
+			selects: "github.com/u-root/u-root/cmds/core/ls",
+		},
+		{
+			name:    "the go command's ... is not path.Match's",
+			in:      "github.com/u-root/u-root/cmds/core/...",
+			want:    false,
+			selects: "github.com/u-root/u-root/cmds/core/...",
+		},
+		{
+			name:    "a closing bracket on its own means nothing",
+			in:      "cmds/core/ls]",
+			want:    false,
+			selects: "cmds/core/ls]",
+		},
+		{
+			name:    "* matches one element",
+			in:      "cmds/core/*",
+			want:    true,
+			selects: "cmds/core/ls",
+		},
+		{
+			name:    "? matches one character",
+			in:      "cmds/core/l?",
+			want:    true,
+			selects: "cmds/core/ls",
+		},
+		{
+			name:    "[ opens a character class",
+			in:      "cmds/core/l[sn]",
+			want:    true,
+			selects: "cmds/core/ls",
+		},
+		{
+			name:       "[ left unclosed is refused rather than taken literally",
+			in:         "cmds/core/l[sn",
+			want:       true,
+			badPattern: true,
+		},
+		{
+			// The case this test was written for. The predicate used to
+			// test for `\\`, which is a raw literal of two backslashes,
+			// while path.Match escapes with one -- so this pattern was
+			// taken for a literal it does not spell.
+			name:    "one backslash escapes the character after it",
+			in:      `cmds/core/l\s`,
+			want:    true,
+			selects: "cmds/core/ls",
+		},
+		{
+			name:    "two backslashes escape a backslash",
+			in:      `cmds/core/l\\s`,
+			want:    true,
+			selects: `cmds/core/l\s`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IsGlob(tt.in); got != tt.want {
+				t.Errorf("IsGlob(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+
+			matched, err := path.Match(tt.in, tt.selects)
+			if tt.badPattern {
+				if !errors.Is(err, path.ErrBadPattern) {
+					t.Fatalf("path.Match(%q, _) error = %v, want ErrBadPattern -- this case no longer witnesses a non-literal", tt.in, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("path.Match(%q, %q): %v", tt.in, tt.selects, err)
+			}
+			if !matched {
+				t.Fatalf("path.Match(%q, %q) = false -- this case does not witness what it claims", tt.in, tt.selects)
+			}
+			// Selecting a path it does not spell is what separates a
+			// glob from a literal. Without this a case could be marked
+			// a glob while naming the pattern itself as what it
+			// selects, which is what every literal does.
+			if selectsItself := tt.selects == tt.in; selectsItself == tt.want {
+				t.Errorf("path.Match(%q, %q): pattern selects only itself = %v, but IsGlob reports glob = %v",
+					tt.in, tt.selects, selectsItself, tt.want)
+			}
+		})
 	}
 }
