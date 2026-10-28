@@ -2,10 +2,12 @@ module github.com/u-root/gobusybox/test
 
 go 1.27.0
 
-require github.com/u-root/gobusybox/src v0.0.0-20211230232531-fcf634c39c0e
+require (
+	github.com/u-root/gobusybox/src v0.0.0-20211230232531-fcf634c39c0e
+	golang.org/x/mod v0.34.0
+)
 
 require (
-	golang.org/x/mod v0.34.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/tools v0.43.0 // indirect
 )
