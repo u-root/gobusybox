@@ -63,7 +63,22 @@ func New(cmds []*packages.Package, opts ...Option) *Plan {
 			continue
 		}
 		s := scan(pkg)
-		if s.refusal != "" {
+		// A refusal says "this package cannot be rewritten to initialize
+		// later", and so makes it an eager root, which drags everything
+		// it imports eager with it. That cannot be said of a command.
+		// A command is rewritten whatever this decides -- its main
+		// becomes registeredMain and its initialization registeredInit,
+		// called at dispatch -- so it never initializes at program start
+		// and the premise the closure rests on does not hold for it.
+		//
+		// Letting it hold cost the whole busybox: one command carrying
+		// an assembly file made every library it reached eager, which
+		// for a busybox of any size is all of them.
+		//
+		// Its linkname *targets* still join the roots, below. Those are
+		// about a package the command may never import, which nothing
+		// else would initialize.
+		if s.refusal != "" && !p.isCommand(path) {
 			roots[path] = s.refusal
 		}
 		for _, symbol := range s.linknameSymbols {
