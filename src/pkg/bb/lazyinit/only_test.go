@@ -6,6 +6,7 @@ package lazyinit
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -50,13 +51,10 @@ func namedGraph(t *testing.T) []*packages.Package {
 func TestDeferOnlyDefersTheNamedPackage(t *testing.T) {
 	p := New(namedGraph(t), DeferOnly([]string{"example.com/m/pkg/lonely"}))
 
-	// first imports lonely, so it cannot stay eager; second and everything
-	// under it is untouched.
-	want := []string{
-		"example.com/m/cmd/first",
-		"example.com/m/cmd/second",
-		"example.com/m/pkg/lonely",
-	}
+	// Libraries only. first imports lonely so it cannot be made eager, but
+	// a command is not deferred either -- it is rewritten whatever the
+	// patterns say.
+	want := []string{"example.com/m/pkg/lonely"}
 	if got := deferredPaths(p); !slices.Equal(got, want) {
 		t.Errorf("deferred set = %v, want %v", got, want)
 	}
@@ -130,8 +128,6 @@ func TestDeferOnlyANamedPackageWithTwoPaths(t *testing.T) {
 	p := New(namedGraph(t), DeferOnly([]string{"example.com/m/pkg/shared"}))
 
 	want := []string{
-		"example.com/m/cmd/first",
-		"example.com/m/cmd/second",
 		"example.com/m/pkg/dependent",
 		"example.com/m/pkg/shared",
 	}
@@ -151,9 +147,6 @@ func TestDeferOnlyNothingDefersNoLibrary(t *testing.T) {
 	p := New(namedGraph(t), DeferOnly(nil))
 
 	for path := range p.pkgs {
-		if p.isCommand(path) {
-			continue
-		}
 		if p.Deferred(path) {
 			t.Errorf("Deferred(%q) = true, want false: no pattern named it", path)
 		}
@@ -226,5 +219,143 @@ func TestHooksFollowTheNarrowedSet(t *testing.T) {
 	}
 	if got := p.Hooks("example.com/m/cmd/second"); len(got) != 0 {
 		t.Errorf("Hooks(second) = %v, want none: it reaches nothing that was named", got)
+	}
+}
+
+// A command is rewritten whatever the patterns say, so naming one defers
+// nothing. Saying so is the point: a -lazy-init that quietly moved nothing
+// would satisfy every differential check, because a candidate identical to
+// its baseline agrees with it on everything.
+func TestNamingACommandIsRefused(t *testing.T) {
+	p := New(namedGraph(t), DeferOnly([]string{"example.com/m/cmd/first"}))
+
+	const cmd = "example.com/m/cmd/first"
+	if p.Deferred(cmd) {
+		t.Error("Deferred(first) = true, want false: a command is not a library")
+	}
+	if got := p.CannotDefer(cmd); !strings.Contains(got, "is a command") {
+		t.Errorf("CannotDefer(first) = %q, want it to say this is a command", got)
+	}
+}
+
+// The three refusals read differently because they send the reader somewhere
+// different: a typo, a misunderstanding of the flag, or a rule doing its job.
+func TestCannotDeferSaysWhich(t *testing.T) {
+	refused := withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"), "/x/a.s")
+	lib := plain(t, "example.com/m/lib")
+	cmd := imports(plain(t, "example.com/m/cmd"), refused, lib)
+
+	p := New([]*packages.Package{cmd}, DeferOnly([]string{"example.com/m/lib"}))
+
+	for _, tt := range []struct {
+		path string
+		want string
+	}{
+		{"example.com/m/absent", "is not imported by any command"},
+		{"example.com/m/cmd", "is a command"},
+		{"example.com/m/refused", "assembly"},
+		{"example.com/m/lib", ""},
+	} {
+		got := p.CannotDefer(tt.path)
+		if tt.want == "" {
+			if got != "" {
+				t.Errorf("CannotDefer(%q) = %q, want it to be deferred", tt.path, got)
+			}
+			continue
+		}
+		if !strings.Contains(got, tt.want) {
+			t.Errorf("CannotDefer(%q) = %q, want it to contain %q", tt.path, got, tt.want)
+		}
+	}
+}
+
+// A command carrying assembly must not drag the whole busybox eager.
+//
+// A refusal says "this package cannot be rewritten to initialize later", which
+// makes it an eager root and takes everything it imports with it. That cannot
+// be said of a command: a command is rewritten whatever this decides, and its
+// initialization already waits for its own dispatch, so it never initializes
+// at program start and the premise does not hold. Letting it hold cost the
+// whole busybox, since every library is reached by some command.
+func TestARefusedCommandDoesNotDragItsLibrariesEager(t *testing.T) {
+	deep := plain(t, "example.com/m/pkg/deep")
+	mid := imports(plain(t, "example.com/m/pkg/mid"), deep)
+	cmd := imports(withOtherFiles(pkg(t, "example.com/m/cmd/c", "package main\n"), "/x/a.s"), mid)
+
+	p := New([]*packages.Package{cmd})
+
+	for _, path := range []string{"example.com/m/pkg/mid", "example.com/m/pkg/deep"} {
+		if p.Eager(path) {
+			t.Errorf("Eager(%q) = true (%s), want false: the only refusal is in a command, which never initializes at program start",
+				path, p.EagerReason(path))
+		}
+	}
+}
+
+// Its linkname targets still join the roots, though. Those name a package the
+// command may never import, so nothing else would initialize it.
+func TestACommandsLinknameTargetIsStillEager(t *testing.T) {
+	victim := plain(t, "example.com/m/victim")
+	cmd := imports(pkg(t, "example.com/m/cmd/c", `package main
+
+import _ "unsafe"
+
+//go:linkname mine example.com/m/victim.Ready
+func mine()
+`), victim)
+
+	p := New([]*packages.Package{cmd})
+
+	if !p.Eager("example.com/m/victim") {
+		t.Error("Eager(victim) = false, want true: a command names it by a path the import graph does not have")
+	}
+	if p.Eager("example.com/m/cmd/c") {
+		t.Error("Eager(cmd) = true, want false: a command is rewritten whatever its own source says")
+	}
+}
+
+// A .syso is a precompiled object the linker takes whole: the same hazard as
+// assembly with none of the source to read.
+func TestASysoFileRefusesLaziness(t *testing.T) {
+	syso := withOtherFiles(pkg(t, "example.com/m/syso", "package p\n"), "/x/blob.syso")
+	cmd := imports(plain(t, "example.com/m/cmd"), syso)
+
+	p := New([]*packages.Package{cmd})
+
+	if !p.Eager("example.com/m/syso") {
+		t.Error("Eager(syso) = false, want true")
+	}
+	if got := p.EagerReason("example.com/m/syso"); !strings.Contains(got, "syso") {
+		t.Errorf("EagerReason(syso) = %q, want it to name the object file", got)
+	}
+}
+
+// linknameTarget resolves the longest prefix that is a package here, and when
+// the real target is not in this busybox that can be a shorter package than
+// the one named. The effect is to make a package eager that need not be,
+// which is the direction the refusal is deliberately over-broad in -- see
+// ADR 0004 -- and there is nothing to resolve it with: the package that would
+// settle it is the one that is absent.
+//
+// Pinned rather than fixed, so that the next reader finds the answer here
+// instead of the question.
+func TestLinknameTargetPrefersAShorterPackageWhenTheRealOneIsAbsent(t *testing.T) {
+	yaml := plain(t, "gopkg.in/yaml")
+	puller := pkg(t, "example.com/m/puller", `package p
+
+import _ "unsafe"
+
+//go:linkname mine gopkg.in/yaml.v3.Marshal
+func mine()
+`)
+	cmd := imports(plain(t, "example.com/m/cmd"), yaml, puller)
+
+	p := New([]*packages.Package{cmd})
+
+	if !p.Eager("gopkg.in/yaml") {
+		t.Error("Eager(gopkg.in/yaml) = false; the over-match is expected and safe, so this test is out of date rather than passing")
+	}
+	if got := p.EagerReason("gopkg.in/yaml"); !strings.Contains(got, "linkname") {
+		t.Errorf("EagerReason = %q, want the linkname reason", got)
 	}
 }

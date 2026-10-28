@@ -5,9 +5,13 @@
 package bbinternal
 
 import (
+	"go/parser"
+	"go/token"
 	"os"
+	gopath "path"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -290,4 +294,197 @@ func packageClause(t *testing.T, src string) string {
 	}
 	t.Fatalf("No package clause in:\n%s", src)
 	return ""
+}
+
+// A package may have a file called bbinit.go of its own. Writing the hook
+// over it loses whatever was there, and quietly: WritePkg has already written
+// the package's real files by the time the hook is written, and the hoisted
+// variable initializers are appended to whichever file sorts first, which
+// "bbinit.go" very often does. The build then fails with `undefined:
+// busyboxInit0`, which names neither the file nor the collision.
+func TestTheGeneratedFileDoesNotOverwriteOneOfThePackagesOwn(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":        "module example.com/m\n\ngo 1.21\n",
+		"cmd/c/main.go": "package main\n\nimport \"example.com/m/pkg/lib\"\n\nfunc main() { println(lib.Precious()) }\n",
+		"pkg/lib/lib.go": `package lib
+
+var V = "var"
+
+func init() { V += "-init" }
+`,
+		// Sorts before lib.go, which is what makes this bite.
+		"pkg/lib/bbinit.go": `package lib
+
+// Precious is a real source file that happens to have this name.
+func Precious() string { return "precious" }
+`,
+	})
+
+	lib := NewLibrary(load(t, dir, "./pkg/lib"))
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := lib.RewriteLibrary(dest, nil); err != nil {
+		t.Fatalf("RewriteLibrary: %v", err)
+	}
+
+	own, err := os.ReadFile(filepath.Join(dest, "bbinit.go"))
+	if err != nil {
+		t.Fatalf("Could not read the package's own bbinit.go: %v", err)
+	}
+	if !strings.Contains(string(own), "Precious") {
+		t.Errorf("The package's own bbinit.go was overwritten:\n%s", own)
+	}
+
+	// The hook went somewhere, and it is not that file.
+	found := ""
+	entries, err := os.ReadDir(dest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		src, err := os.ReadFile(filepath.Join(dest, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(string(src), "func "+lib.HookName()+"()") {
+			found = e.Name()
+		}
+	}
+	if found == "" {
+		t.Errorf("The hook was not written at all; the directory holds %v", names(entries))
+	}
+	if found == "bbinit.go" {
+		t.Error("The hook was written over the package's own bbinit.go")
+	}
+}
+
+// Two inferred variable types naming different packages that call themselves
+// the same thing. go/types' scopes describe the source as it was loaded and
+// know nothing of an import this rewrite has already added, so without
+// recording them both would be offered "foo":
+//
+//	lib.go:4:2: other declaration of foo
+//	lib.go:5:2: "example.com/b/foo" imported and not used
+func TestTwoAddedImportsNamedTheSameGetDifferentNames(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":           "module example.com/m\n\ngo 1.21\n",
+		"cmd/c/main.go":    "package main\n\nimport \"example.com/m/pkg/lib\"\n\nfunc main() { println(lib.X.N, lib.Y.M) }\n",
+		"pkg/a/foo/foo.go": "package foo\n\ntype T struct{ N int }\n",
+		"pkg/b/foo/foo.go": "package foo\n\ntype U struct{ M int }\n",
+		"pkg/mk/mk.go": `package mk
+
+import (
+	afoo "example.com/m/pkg/a/foo"
+	bfoo "example.com/m/pkg/b/foo"
+)
+
+func MakeT() *afoo.T { return &afoo.T{N: 1} }
+func MakeU() *bfoo.U { return &bfoo.U{M: 2} }
+`,
+		// Neither a/foo nor b/foo is imported here, so the rewrite has
+		// to add both, and both are called foo.
+		"pkg/lib/lib.go": `package lib
+
+import "example.com/m/pkg/mk"
+
+var X = mk.MakeT()
+var Y = mk.MakeU()
+`,
+	})
+
+	lib := NewLibrary(load(t, dir, "./pkg/lib"))
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := lib.RewriteLibrary(dest, nil); err != nil {
+		t.Fatalf("RewriteLibrary: %v", err)
+	}
+
+	src, err := os.ReadFile(filepath.Join(dest, "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Both packages have to be imported, and under names that differ.
+	for _, path := range []string{`"example.com/m/pkg/a/foo"`, `"example.com/m/pkg/b/foo"`} {
+		if !strings.Contains(string(src), path) {
+			t.Errorf("The rewritten file does not import %s:\n%s", path, src)
+		}
+	}
+	if names := importNames(t, string(src)); len(names) != len(unique(names)) {
+		t.Errorf("The rewritten file declares an import name twice (%v):\n%s", names, src)
+	}
+}
+
+// `var _ = f()` declares nothing, so the rewrite leaves no declaration
+// behind: the assignment keeps the side effect. Writing `var _ T` out is at
+// best noise, and unbuildable when T is a type this file cannot name.
+func TestABlankVariableLeavesNoDeclaration(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":        "module example.com/m\n\ngo 1.21\n",
+		"cmd/c/main.go": "package main\n\nimport _ \"example.com/m/pkg/lib\"\n\nfunc main() {}\n",
+		"pkg/lib/lib.go": `package lib
+
+import "fmt"
+
+var _ = fmt.Sprint("side effect")
+
+var V = "kept"
+`,
+	})
+
+	lib := NewLibrary(load(t, dir, "./pkg/lib"))
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := lib.RewriteLibrary(dest, nil); err != nil {
+		t.Fatalf("RewriteLibrary: %v", err)
+	}
+	src, err := os.ReadFile(filepath.Join(dest, "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(src), "var _ ") {
+		t.Errorf("The rewrite left a declaration for a blank variable:\n%s", src)
+	}
+	if !strings.Contains(string(src), `_ = fmt.Sprint("side effect")`) {
+		t.Errorf("The rewrite dropped the blank variable's side effect:\n%s", src)
+	}
+	if !strings.Contains(string(src), "var V string") {
+		t.Errorf("The rewrite lost a real variable:\n%s", src)
+	}
+}
+
+func names(entries []os.DirEntry) []string {
+	var out []string
+	for _, e := range entries {
+		out = append(out, e.Name())
+	}
+	return out
+}
+
+// importNames returns the local name of every import in src, as written.
+func importNames(t *testing.T, src string) []string {
+	t.Helper()
+
+	f, err := parser.ParseFile(token.NewFileSet(), "src.go", src, parser.ImportsOnly)
+	if err != nil {
+		t.Fatalf("Could not parse the rewritten file: %v", err)
+	}
+	var out []string
+	for _, imp := range f.Imports {
+		if imp.Name != nil {
+			out = append(out, imp.Name.Name)
+			continue
+		}
+		path, _ := strconv.Unquote(imp.Path.Value)
+		out = append(out, gopath.Base(path))
+	}
+	return out
+}
+
+func unique(s []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, v := range s {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }

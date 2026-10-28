@@ -131,6 +131,11 @@ type Package struct {
 	// renamed bodies of the original init functions, in the right order.
 	init *ast.FuncDecl
 
+	// addedImports records, per file, the names this rewrite has given to
+	// imports it added. go/types' scopes describe the source as loaded and
+	// cannot know about them.
+	addedImports map[*ast.File]map[string]bool
+
 	// initAssigns is a map of assignment expression -> busyboxInitN function
 	// call statement.
 	//
@@ -295,7 +300,28 @@ func (p *Package) pkgImportNameTaken(name string, f *ast.File) bool {
 	if p.Pkg.TypesInfo.Scopes[f].Lookup(name) != nil {
 		return true
 	}
-	return false
+
+	// Scopes are go/types' record of the source as it was loaded, so they
+	// know nothing of an import this rewrite has already added. Two
+	// inferred variable types naming different packages that call
+	// themselves the same thing -- a/foo and b/foo, which is ordinary --
+	// would otherwise both be offered "foo":
+	//
+	//	lib.go:4:2: other declaration of foo
+	//	lib.go:5:2: "example.com/b/foo" imported and not used
+	return p.addedImports[f][name]
+}
+
+// recordImport notes a name this rewrite has given to an import in f, so that
+// the next one in the same file does not take it as well.
+func (p *Package) recordImport(name string, f *ast.File) {
+	if p.addedImports == nil {
+		p.addedImports = make(map[*ast.File]map[string]bool)
+	}
+	if p.addedImports[f] == nil {
+		p.addedImports[f] = make(map[string]bool)
+	}
+	p.addedImports[f][name] = true
 }
 
 // funcNameTaken checks whether name would conflict with any
@@ -412,8 +438,10 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		// all previously, and we now need to add an import for log.
 		importAlias := p.newImportName(pkg.Name(), f)
 		astutil.AddNamedImport(p.Pkg.Fset, f, importAlias, importPath)
-		// Make sure we do not add this import twice.
+		// Make sure we do not add this import twice, and that the next
+		// package calling itself the same thing is given another name.
 		importAliases[importPath] = importAlias
+		p.recordImport(importAlias, f)
 
 		return importAlias
 	}
@@ -471,6 +499,18 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 				// its own spec. format.Node parenthesizes the
 				// declaration when there is more than one.
 				for _, name := range s.Names {
+					// `var _ = f()` declares nothing, so
+					// there is nothing to leave behind:
+					// the assignment keeps the side
+					// effect and the blank needs no
+					// declaration to be assigned to.
+					// Writing one out is at best noise
+					// and at worst unbuildable, since the
+					// inferred type may be one this file
+					// cannot name.
+					if name.Name == "_" {
+						continue
+					}
 					typ := p.Pkg.TypesInfo.Defs[name].Type()
 					specs = append(specs, &ast.ValueSpec{
 						Names: []*ast.Ident{name},
@@ -623,7 +663,7 @@ func (p *Package) writeHook(destDir string, deps []Hook) error {
 	}
 	fmt.Fprintf(&b, "}\n")
 
-	return writeGoFile(filepath.Join(destDir, "bbinit.go"), []byte(b.String()))
+	return writeGoFile(filepath.Join(destDir, p.generatedFileName("bbinit")), []byte(b.String()))
 }
 
 // importAliases writes the import block for deps and returns the alias chosen
@@ -644,6 +684,32 @@ func (p *Package) importAliases(b *strings.Builder, deps []Hook) []string {
 	}
 	b.WriteString(")\n\n")
 	return aliases
+}
+
+// generatedFileName returns a file name in destDir that none of p's own
+// files already uses.
+//
+// A package may have a file called bbinit.go of its own -- it is an ordinary
+// name and nothing reserves it. Writing over it loses whatever was in it, and
+// quietly: WritePkg has already written the package's real files by the time
+// this runs, and the hoisted variable initializers are appended to whichever
+// file sorts first, which "bbinit.go" very often does. The result compiles
+// only by accident, and when it does not the error is `undefined:
+// busyboxInit0`, which names neither the file nor the collision.
+func (p *Package) generatedFileName(want string) string {
+	taken := make(map[string]bool, len(p.Pkg.GoFiles)+len(p.Pkg.OtherFiles))
+	for _, f := range p.Pkg.GoFiles {
+		taken[filepath.Base(f)] = true
+	}
+	for _, f := range p.Pkg.OtherFiles {
+		taken[filepath.Base(f)] = true
+	}
+
+	name := want + ".go"
+	for i := 0; taken[name]; i++ {
+		name = fmt.Sprintf("%s%d.go", want, i)
+	}
+	return name
 }
 
 // WritePkg writes p's files into destDir.
@@ -804,7 +870,7 @@ func (p *Package) writeDeferredInit(destDir, name string, deps []Hook) error {
 	}
 	fmt.Fprintf(&b, "}\n")
 
-	return writeGoFile(filepath.Join(destDir, "bbinit.go"), []byte(b.String()))
+	return writeGoFile(filepath.Join(destDir, p.generatedFileName("bbinit")), []byte(b.String()))
 }
 
 func writeFile(path string, fset *token.FileSet, f *ast.File) error {

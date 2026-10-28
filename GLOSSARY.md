@@ -70,19 +70,11 @@ second and later calls return immediately. Emitted as `BusyboxInit`, in a
 generated `bbinit.go`. See [ADR 0004](docs/adr/0004-library-init-runs-for-the-command-that-needs-it.md).
 _Avoid_: initializer, callback, trampoline, thunk
 
-**Eager set**:
-The packages that still initialize at program start, before any command is
-dispatched. It is closed under imports -- an eager package initializes before
-every deferred one, so it may not import one -- and is therefore computed as a
-closure rather than decided one package at a time. The standard library is
-always in it, as are packages carrying `//go:linkname` or an assembly file and
-anything they import. Computed by `lazyinit.Plan`.
-_Avoid_: strict set, early set, non-lazy set
-
 **Deferred**:
-Said of a package whose initialization has moved into its hook, so that it
+Said of a library whose initialization has moved into its hook, so that it
 runs for the command that imports it rather than for every command in the
-busybox. The complement of the eager set.
+busybox. The complement of the eager set over the busybox's libraries: a
+command is neither, its initialization already waiting for its own dispatch.
 _Avoid_: lazy package, delayed, postponed
 
 **Registered main**:
@@ -115,9 +107,12 @@ any command is dispatched, rather than when a command that imports them is.
 It is a closure, not a per-package decision: an eager package initializes
 before every deferred one, so everything an eager package imports is eager
 too. Standard library packages are always in it, as are packages carrying
-`//go:linkname` or an assembly file, and the packages a two-argument
-`//go:linkname` names. Decided by `lazyinit.Plan`, which reports membership
-through `Eager` and the reason through `EagerReason`.
+`//go:linkname`, an assembly file or a `.syso` object, packages whose hoisted
+variables would have a type they cannot name, and the packages a two-argument
+`//go:linkname` names. A command is never in it, being rewritten whatever its
+own source carries. Decided by `lazyinit.Plan`, which reports membership
+through `Eager`, the reason through `EagerReason`, and why a named package
+will not move through `CannotDefer`.
 _Avoid_: eager flag, eager list, non-lazy set
 
 **Registry**:

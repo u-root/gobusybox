@@ -94,14 +94,31 @@ func (p *Plan) isCommand(pkgPath string) bool {
 	return false
 }
 
-// Deferred reports whether the package at this import path is in the busybox
-// and initializes when a command that imports it is dispatched, rather than
-// at program start.
+// Deferred reports whether the package at this import path is a library in
+// this busybox whose initialization waits for a command that imports it.
 //
-// It is not the negation of Eager: a path naming no package in this busybox
-// is neither. EagerReason tells the two apart, being empty only for the
-// package that is not here at all.
+// It is not the negation of Eager. A path naming no package here is neither,
+// and neither is a command: a command is rewritten whatever the patterns say,
+// its initialization already deferred to its own dispatch by registeredInit.
+// CannotDefer tells the three apart.
 func (p *Plan) Deferred(pkgPath string) bool {
 	_, known := p.pkgs[pkgPath]
-	return known && !p.Eager(pkgPath)
+	return known && !p.Eager(pkgPath) && !p.isCommand(pkgPath)
+}
+
+// CannotDefer says why the package at this import path will not have its
+// initialization deferred, and is empty when it will.
+//
+// The three refusals read differently because they send the reader to
+// different places: a path that is not here is usually a typo, a command is a
+// misunderstanding of what the flag is for, and an eager package is a rule
+// doing its job.
+func (p *Plan) CannotDefer(pkgPath string) string {
+	if _, known := p.pkgs[pkgPath]; !known {
+		return "is not imported by any command in this busybox"
+	}
+	if p.isCommand(pkgPath) {
+		return "is a command, whose initialization already waits for its own dispatch"
+	}
+	return p.EagerReason(pkgPath)
 }

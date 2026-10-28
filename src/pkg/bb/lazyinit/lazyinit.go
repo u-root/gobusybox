@@ -23,8 +23,26 @@ import (
 // looking for it in their own source.
 const (
 	refusedAssembly = "has an assembly file"
+	refusedObject   = "has a .syso object file"
 	refusedLinkname = "has a //go:linkname directive"
 )
+
+// objectFileExts are the non-Go files that can define a symbol other code
+// binds to by name.
+//
+// .s is assembly. .syso is a precompiled object the linker takes whole, which
+// is the same hazard with none of the source to read.
+//
+// .S and .sx are assembly too, and are deliberately absent: go/packages
+// reports them in OtherFiles only for a package that uses cgo, which this
+// never sees, because makebb disables cgo and gomodbb inherits that. Measured
+// on Go 1.27 with CGO_ENABLED=1, a package carrying empty.S and empty.sx
+// reports OtherFiles=[] for both. Listing them would be a check that cannot
+// fire rather than a guard.
+var objectFileExts = map[string]string{
+	".s":    refusedAssembly,
+	".syso": refusedObject,
+}
 
 // scanResult is what one package's own source says about deferring its
 // initialization.
@@ -52,9 +70,15 @@ type scanResult struct {
 func scan(p *packages.Package) scanResult {
 	var r scanResult
 
+	// Checked first, because it is the refusal a reader is least likely to
+	// guess from their own source.
+	if hasUnnameableVarType(p) {
+		r.refusal = refusedUnnameableType
+	}
+
 	for _, f := range p.OtherFiles {
-		if path.Ext(f) == ".s" {
-			r.refusal = refusedAssembly
+		if reason, ok := objectFileExts[path.Ext(f)]; ok {
+			r.refusal = reason
 			break
 		}
 	}

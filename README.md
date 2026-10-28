@@ -556,11 +556,15 @@ Three rules make this safe, and all three are enforced rather than documented:
   read a table that had not been built.
 - **Naming a package defers everything that imports it.** An eager package
   initializes before any deferred one, so it may not import one.
-- **Laziness is refused for a package carrying `//go:linkname` or an assembly
-  file**, and for the target of a two-argument `//go:linkname`, because both
-  can reach a package by a path the import graph does not have. The standard
-  library is never rewritten. Naming a package that cannot be deferred fails
-  the build rather than being ignored.
+- **Laziness is refused for a package carrying `//go:linkname`, an assembly
+  file or a `.syso` object**, and for the target of a two-argument
+  `//go:linkname`, because each can reach a package by a path the import graph
+  does not have. It is refused too for a package whose hoisted variables would
+  have a type that cannot be named outside the package defining it, which no
+  generated declaration can spell. The standard library is never rewritten,
+  and a command is never refused: its initialization already waits for its own
+  dispatch. Naming a package that cannot be deferred fails the build rather
+  than being ignored.
 
 See [ADR 0004](./docs/adr/0004-library-init-runs-for-the-command-that-needs-it.md)
 for what this recovers and what it does not.

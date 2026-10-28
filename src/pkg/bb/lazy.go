@@ -54,16 +54,8 @@ func planInit(cmds []*bbinternal.Package, named []string) (*lazyinit.Plan, error
 	// check this has.
 	var refused []string
 	for _, path := range named {
-		if plan.Deferred(path) {
-			continue
-		}
-		// EagerReason is empty only for a package that is not in this
-		// busybox at all, which is the typo case and needs saying
-		// differently from a package that is here and cannot move.
-		if reason := plan.EagerReason(path); reason != "" {
-			refused = append(refused, fmt.Sprintf("%s %s", path, reason))
-		} else {
-			refused = append(refused, fmt.Sprintf("%s is not imported by any command in this busybox", path))
+		if why := plan.CannotDefer(path); why != "" {
+			refused = append(refused, fmt.Sprintf("%s %s", path, why))
 		}
 	}
 	if len(refused) > 0 {

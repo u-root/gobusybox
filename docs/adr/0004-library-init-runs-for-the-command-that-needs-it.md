@@ -105,13 +105,56 @@ decided one package at a time. Standard library packages are never rewritten
 and are always eager, which is consistent because no standard library package
 imports a vendored one.
 
-Laziness is refused outright for any package carrying `//go:linkname` or an
-assembly file. Both can bind a symbol in another package by name, so such a
-package can be rewritten cleanly, compile, and still misbehave, because
-something reaches its state by a path that is not in the import graph. The
-refusal is static and over-broad on purpose. Anything else that defeats the
-rewrite falls back to eager and is reported at the end of the build, never
-silently.
+Laziness is refused outright for any package carrying `//go:linkname`, an
+assembly file, or a `.syso` object. Each can bind a symbol in another package
+by name, so such a package can be rewritten cleanly, compile, and still
+misbehave, because something reaches its state by a path that is not in the
+import graph. A `.syso` is the same hazard as assembly with none of the source
+to read. The refusal is static and over-broad on purpose. Anything else that
+defeats the rewrite falls back to eager and is reported at the end of the
+build, never silently.
+
+`.S` and `.sx` are assembly too and are deliberately absent from that list.
+go/packages reports them only for a package that uses cgo, which this never
+sees, because makebb disables cgo and gomodbb inherits that; measured on
+Go 1.27 with `CGO_ENABLED=1`, a package carrying `empty.S` and `empty.sx`
+reports no other files for either. Listing them would be a check that cannot
+fire rather than a guard.
+
+A fourth refusal is not about reaching a package from outside but about
+writing it down. Hoisting `var V = expr` splits it into a declaration and an
+assignment, and the declaration has to state the type that was inferred. When
+that type is unexported and belongs to another package, there is no way to
+state it:
+
+```
+package other                      package lib
+type client struct{ ... }          var V = other.New()
+func New() *client                 // rewritten as: var V *other.client
+```
+
+which the compiler refuses with *name client not exported by package other*.
+Go has no declaration that names a type without naming it, so the choice is
+between leaving the package's initialization where it is and emitting source
+that does not build. Such a package is refused.
+
+This one is not a consequence of deferring. `bbinternal.Package.Rewrite` has
+hoisted a command's variables the same way since the beginning and fails the
+same way on the same input; what changes is the chance of meeting it, because
+commands are hand-written and libraries are whatever the module graph drags
+in. The refusal covers the libraries this decision newly rewrites. The command
+case is older and still open.
+
+**A command is never refused**, whatever its own source carries. A refusal
+makes a package an eager root, and an eager root drags everything it imports
+eager with it, which is sound only for a package that initializes at program
+start. A command does not: it is rewritten whatever this decides, its `main`
+becoming `registeredMain` and its initialization `registeredInit`, called at
+dispatch. Treating one as a root cost the entire busybox, since every library
+is reached by some command, so a single command carrying an assembly file
+would leave nothing deferrable. Its `//go:linkname` *targets* still join the
+roots, by the rule below: those name a package the command may never import,
+which nothing else would initialize.
 
 Refusing the package that carries the directive is not quite enough. The
 two-argument form, `//go:linkname local importpath.name`, names a symbol in
@@ -132,6 +175,18 @@ per module, because the scanner reads the directives go/packages has already
 filtered by build constraints; this one is linux/amd64 against x/sys v0.38.0.
 The rule costs nothing to state and the scanner has to look at the directive
 anyway.
+
+Which package a symbol names is decided by which packages are in the build
+rather than by the text, because both halves may contain dots:
+`example.com/victim.(*T).Ready` is a method, so its final dot separates
+nothing useful. Each dot is tried from the right and the longest prefix that
+is a package here wins, `gopkg.in/yaml.v3` being the ordinary case and
+`gopkg.in/yaml` possibly sitting beside it. When the package a symbol really
+names is *not* in this build and a shorter prefix is, that shorter one is
+taken and made eager. The answer is wrong and the direction is safe -- a
+package is made eager that need not be -- and there is nothing to resolve it
+with, since the package that would settle it is the one that is absent. It is
+pinned by a test rather than fixed.
 
 Importing `unsafe` is **not** on that list, though it is the obvious third
 candidate. `unsafe` lets a package do what it likes to memory it already has;
