@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
+	"golang.org/x/mod/module"
+	modzip "golang.org/x/mod/zip"
 )
 
 // lazyInitFlags turns a list of import paths into the makebb arguments that
@@ -277,24 +279,19 @@ func TestLazyInitDifferential(t *testing.T) {
 	}
 }
 
-// TestLazyInitDifferentialGomodbb is the same check for the other caller of
-// the build engine.
+// TestLazyInitDifferentialGomodbb is the same check against real
+// third-party code.
 //
-// makebb and gomodbb share one engine -- bb.BuildBusybox, and with it the
-// entire rewrite, which lives in pkg/bb and nowhere else. The fixtures above
-// therefore already cover the code a deferred init would break, for both
-// commands. What they do not cover is the *input* gomodbb hands that engine:
-// it resolves packages inside a synthetic module, with Env.Dir set and
-// GOWORK=off, over source in a read-only module cache rather than a checkout.
-// makebb never does any of that, so no fixture can produce the shape. Since
-// deferring a library's init is decided from the import graph, the context
-// that graph is resolved in is worth a check of its own.
+// What it adds over TestLazyInitDifferentialGomodbbOffline, which covers
+// gomodbb's resolution context in the default suite, is the source: pflag,
+// go-humanize, u-root's own pkg/ls, and a golang.org/x/sys/unix the rules
+// refuse for carrying both a //go:linkname and an assembly file. None of
+// that was written to be rewritten, which is the whole of what it is for.
 //
-// It needs the proxy, so it sits behind -external and the default suite is
-// unchanged. That is a weaker guarantee than the fixtures get, and the reason
-// is gomodbb pinning GOPROXY to the public proxy: until it can be pointed at
-// a warm module cache, there is no offline gomodbb to put in the default
-// suite.
+// It fetches from the public proxy, so it stays behind -external. That is
+// about the network and the minutes, not about anything gomodbb does: since
+// #168 it leaves GOPROXY alone, which is what lets the offline test point it
+// at a proxy of its own.
 func TestLazyInitDifferentialGomodbb(t *testing.T) {
 	if !*external {
 		t.Skip("Skipping; pass -external to fetch from the module proxy and run this")
@@ -526,5 +523,137 @@ func TestDeferringArmsTheOneCommandGuard(t *testing.T) {
 	unarmed := filepath.Join(generate("baseline", nil), "pkg", "bbmain", "lazyinit.go")
 	if _, err := os.Stat(unarmed); !os.IsNotExist(err) {
 		t.Errorf("A busybox that defers nothing armed bbmain's guard anyway (%v)", err)
+	}
+}
+
+// fileProxy lays srcDir out as a module proxy and returns a GOPROXY value
+// pointing at it.
+//
+// The go command serves file:// proxies, so a module that was never published
+// can be fetched by path and version exactly as a published one is. That is
+// what makes a gomodbb test possible without the network: gomodbb's whole
+// input is a module path and a version, and nothing about resolving one has
+// to involve the internet.
+//
+// It is only reachable because gomodbb leaves GOPROXY alone. goCmd overrides
+// GOPRIVATE, GONOPROXY and GOVCS and deliberately not this, so that a caller
+// may point it at "a corporate mirror, or a cache standing in for the network
+// so that a test can run offline" -- which is this.
+func fileProxy(t *testing.T, modPath, version, srcDir string) string {
+	t.Helper()
+
+	proxy := t.TempDir()
+	dir := filepath.Join(proxy, filepath.FromSlash(modPath), "@v")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("Could not create the proxy directory: %v", err)
+	}
+
+	src, err := filepath.Abs(srcDir)
+	if err != nil {
+		t.Fatalf("Could not resolve %s: %v", srcDir, err)
+	}
+	gomod, err := os.ReadFile(filepath.Join(src, "go.mod"))
+	if err != nil {
+		t.Fatalf("Could not read the fixture's go.mod: %v", err)
+	}
+
+	// A proxy serves three files per version. The timestamp is fixed
+	// rather than taken from the clock, so that two runs produce the same
+	// proxy and a failure is about the build.
+	write := func(name string, content []byte) {
+		if err := os.WriteFile(filepath.Join(dir, name), content, 0o644); err != nil {
+			t.Fatalf("Could not write %s: %v", name, err)
+		}
+	}
+	write(version+".mod", gomod)
+	write(version+".info", []byte(`{"Version":"`+version+`","Time":"2026-01-01T00:00:00Z"}`))
+
+	zf, err := os.Create(filepath.Join(dir, version+".zip"))
+	if err != nil {
+		t.Fatalf("Could not create the module zip: %v", err)
+	}
+	defer zf.Close()
+	if err := modzip.CreateFromDir(zf, module.Version{Path: modPath, Version: version}, src); err != nil {
+		t.Fatalf("Could not zip %s as %s@%s: %v", src, modPath, version, err)
+	}
+	return "file://" + filepath.ToSlash(proxy)
+}
+
+// TestLazyInitDifferentialGomodbbOffline is the differential check run
+// through gomodbb, in the default suite.
+//
+// makebb and gomodbb share one engine -- bb.BuildBusybox, and with it the
+// entire rewrite, which lives in pkg/bb and nowhere else. What the makebb
+// fixtures cannot cover is the *input* gomodbb hands that engine: it resolves
+// packages inside a synthetic module it wrote itself, with Env.Dir set and
+// GOWORK=off, over source in a read-only module cache rather than a checkout.
+// Since which packages are deferred is decided from the import graph, the
+// context that graph is resolved in is worth a check of its own.
+//
+// It serves the libinit fixture from a file:// proxy, so it needs no network
+// and runs in about three seconds. That is the same fixture TestMakeBB and
+// TestLazyInitDifferential build directly, which is the point: one fixture,
+// reached two ways, so an edit to it is seen by both and neither can drift
+// into testing a tree the other does not.
+//
+// TestLazyInitDifferentialGomodbb stays behind -external and keeps its own
+// job, which is real third-party code -- pflag, go-humanize, a refused
+// golang.org/x/sys/unix -- rather than source written to be rewritten.
+func TestLazyInitDifferentialGomodbbOffline(t *testing.T) {
+	const modPath = "github.com/u-root/gobusybox/test/libinit"
+	const version = "v0.0.1"
+
+	gomodbbBin := buildTool(t, "gomodbb")
+	proxy := fileProxy(t, modPath, version, "libinit")
+
+	dir := t.TempDir()
+	env := []string{
+		"GOPATH=" + scratchGOPATH(t),
+		"GOPROXY=" + proxy,
+		// The fixture was never published, so there is no entry for it
+		// in the checksum database and consulting one would need the
+		// network this test exists to do without.
+		"GOSUMDB=off",
+	}
+
+	// Both builds share one fetching module, so the second resolves
+	// nothing and the two are built from the same source. Without it the
+	// proxy would be asked the same question twice.
+	modDir := filepath.Join(dir, "fetch")
+	cmds := []string{
+		modPath + "/cmd/first@" + version,
+		modPath + "/cmd/second@" + version,
+	}
+
+	build := func(name string, extra []string) string {
+		args := append([]string{"-mod-dir", modDir, "-o", name}, extra...)
+		run(t, dir, env, gomodbbBin, append(args, cmds...)...)
+		return filepath.Join(dir, name)
+	}
+
+	baseline := build("bb-baseline", nil)
+	candidate := build("bb-lazy", lazyInitFlags([]string{modPath + "/pkg/lonely"}))
+
+	for _, cmdName := range []string{"first", "second"} {
+		t.Run(cmdName, func(t *testing.T) {
+			compareRuns(t, cmdName,
+				runCommand(t, baseline, cmdName),
+				runCommand(t, candidate, cmdName))
+		})
+	}
+
+	// The same two halves TestADeferredInitLeavesTheStartupTrace asserts
+	// for makebb, because the graph they are decided from was resolved by
+	// a different route here.
+	lonely := modPath + "/pkg/lonely"
+	if base := runCommand(t, baseline, "second"); !slices.Contains(base.initPackages, lonely) {
+		t.Errorf("second did not run %s's init even in the baseline, so deferring it proves nothing", lonely)
+	}
+	if cand := runCommand(t, candidate, "second"); slices.Contains(cand.initPackages, lonely) {
+		t.Errorf("second still runs %s's init at program start with -lazy-init", lonely)
+	}
+	const ran = "lonely.init(saw lonely.var)"
+	if got := runCommand(t, candidate, "first"); !strings.Contains(got.output, ran) {
+		t.Errorf("first printed %q, which does not contain %q", got.output, ran)
 	}
 }
