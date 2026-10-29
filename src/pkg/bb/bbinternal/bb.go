@@ -99,8 +99,30 @@ type Package struct {
 	// Pkg is the actual data about the package.
 	Pkg *packages.Package
 
+	// library is set for a package rewritten to initialize when a command
+	// that imports it is dispatched, rather than for a command.
+	//
+	// A library keeps its package name and its import path, because
+	// everything importing it goes on importing it by that path. A command
+	// is renamed to a package so that its main becomes an ordinary
+	// function, which is why the two rewrites differ at all.
+	library bool
+
+	// hookName is the exported function that runs a library's
+	// initialization, empty for a command.
+	hookName string
+
+	// hookDone is the package-level boolean that makes the second and
+	// later calls to the hook return immediately, empty for a command.
+	hookDone string
+
 	// initCount keeps track of what the next init's index should be.
 	initCount uint
+
+	// initCalls names the busyboxInitN functions that have to be called,
+	// in the order Go would have run them: the hoisted package-level
+	// variables first, then each original init body in file order.
+	initCalls []string
 
 	// mainFuncName is the name for the renamed main().
 	mainFuncName string
@@ -108,6 +130,11 @@ type Package struct {
 	// init is the registeredInit function that calls busyboxInit0 and the
 	// renamed bodies of the original init functions, in the right order.
 	init *ast.FuncDecl
+
+	// addedImports records, per file, the names this rewrite has given to
+	// imports it added. go/types' scopes describe the source as loaded and
+	// cannot know about them.
+	addedImports map[*ast.File]map[string]bool
 
 	// initAssigns is a map of assignment expression -> busyboxInitN function
 	// call statement.
@@ -148,6 +175,30 @@ func NewPackage(name string, p *packages.Package) *Package {
 	return pp
 }
 
+// NewLibrary creates a Package for a library whose initialization is deferred
+// to the commands that import it.
+//
+// Its hook is exported because the packages that call it are other packages.
+// The name is chosen by the same collision check that picks registeredMain,
+// since a library is arbitrary third-party source that may already have a
+// function of that name.
+func NewLibrary(p *packages.Package) *Package {
+	pp := &Package{
+		Name:        p.Name,
+		Pkg:         p,
+		library:     true,
+		initAssigns: make(map[ast.Expr]ast.Stmt),
+	}
+	pp.hookName = pp.newFunctionName("BusyboxInit")
+	pp.hookDone = pp.newFunctionName("busyboxInitDone")
+	return pp
+}
+
+// HookName is the exported function that runs this library's initialization.
+func (p *Package) HookName() string {
+	return p.hookName
+}
+
 func (p *Package) nextInit(addToCallList bool) *ast.Ident {
 	nextInitName := fmt.Sprintf("busyboxInit%d", p.initCount)
 	for p.funcNameTaken(nextInitName) {
@@ -156,7 +207,12 @@ func (p *Package) nextInit(addToCallList bool) *ast.Ident {
 	}
 	i := ast.NewIdent(nextInitName)
 	if addToCallList {
-		p.init.Body.List = append(p.init.Body.List, &ast.ExprStmt{X: &ast.CallExpr{Fun: i}})
+		// A library has no registeredInit: its hook is generated from
+		// initCalls, which both kinds record.
+		if p.init != nil {
+			p.init.Body.List = append(p.init.Body.List, &ast.ExprStmt{X: &ast.CallExpr{Fun: i}})
+		}
+		p.initCalls = append(p.initCalls, nextInitName)
 	}
 	p.initCount++
 	return i
@@ -244,7 +300,28 @@ func (p *Package) pkgImportNameTaken(name string, f *ast.File) bool {
 	if p.Pkg.TypesInfo.Scopes[f].Lookup(name) != nil {
 		return true
 	}
-	return false
+
+	// Scopes are go/types' record of the source as it was loaded, so they
+	// know nothing of an import this rewrite has already added. Two
+	// inferred variable types naming different packages that call
+	// themselves the same thing -- a/foo and b/foo, which is ordinary --
+	// would otherwise both be offered "foo":
+	//
+	//	lib.go:4:2: other declaration of foo
+	//	lib.go:5:2: "example.com/b/foo" imported and not used
+	return p.addedImports[f][name]
+}
+
+// recordImport notes a name this rewrite has given to an import in f, so that
+// the next one in the same file does not take it as well.
+func (p *Package) recordImport(name string, f *ast.File) {
+	if p.addedImports == nil {
+		p.addedImports = make(map[*ast.File]map[string]bool)
+	}
+	if p.addedImports[f] == nil {
+		p.addedImports[f] = make(map[string]bool)
+	}
+	p.addedImports[f][name] = true
 }
 
 // funcNameTaken checks whether name would conflict with any
@@ -300,7 +377,14 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 	// Change the package name declaration from main to the command's name.
 	// Remove all non-alphanumeric characters except for underscore and ensure
 	// starting with a letter. There are more valid identifiers though.
-	f.Name.Name = p.PackageName()
+	//
+	// A library keeps its own name and its own import path. Everything that
+	// imports it names it by that path, and those import statements are not
+	// rewritten; only a command is renamed, because a command's package is
+	// main and two of those cannot sit in one binary.
+	if !p.library {
+		f.Name.Name = p.PackageName()
+	}
 
 	// Map of fully qualified package name -> imported alias in the file.
 	importAliases := make(map[string]string)
@@ -354,8 +438,10 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		// all previously, and we now need to add an import for log.
 		importAlias := p.newImportName(pkg.Name(), f)
 		astutil.AddNamedImport(p.Pkg.Fset, f, importAlias, importPath)
-		// Make sure we do not add this import twice.
+		// Make sure we do not add this import twice, and that the next
+		// package calling itself the same thing is given another name.
 		importAliases[importPath] = importAlias
+		p.recordImport(importAlias, f)
 
 		return importAlias
 	}
@@ -413,6 +499,18 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 				// its own spec. format.Node parenthesizes the
 				// declaration when there is more than one.
 				for _, name := range s.Names {
+					// `var _ = f()` declares nothing, so
+					// there is nothing to leave behind:
+					// the assignment keeps the side
+					// effect and the blank needs no
+					// declaration to be assigned to.
+					// Writing one out is at best noise
+					// and at worst unbuildable, since the
+					// inferred type may be one this file
+					// cannot name.
+					if name.Name == "_" {
+						continue
+					}
 					typ := p.Pkg.TypesInfo.Defs[name].Type()
 					specs = append(specs, &ast.ValueSpec{
 						Names: []*ast.Ident{name},
@@ -423,7 +521,7 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 			d.Specs = specs
 
 		case *ast.FuncDecl:
-			if d.Recv == nil && d.Name.Name == "main" {
+			if !p.library && d.Recv == nil && d.Name.Name == "main" {
 				d.Name.Name = p.mainFuncName
 				hasMain = true
 			}
@@ -446,6 +544,172 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 		}
 	}
 	return hasMain
+}
+
+// Hook is a deferred package's initialization, as the generated code reaches
+// it: the path to import, and the exported function to call.
+type Hook struct {
+	// ImportPath is the package's import path, which is also where the
+	// generated tree vendors it.
+	ImportPath string
+
+	// FuncName is the package's exported hook.
+	FuncName string
+}
+
+// hoistInit moves p's package-level variable initializers and its init bodies
+// into the numbered functions the rewrite emits as busyboxInitN, and returns
+// the one holding the variables.
+//
+// The variables come first and the init bodies after, which is the order Go
+// runs them in. Each variable's initializer is left in the file it was
+// written in, because an expression may name an import and imports are scoped
+// to a file; only the calls to them are gathered here, and a call names
+// nothing but a package-scope function.
+func (p *Package) hoistInit() (*ast.FuncDecl, *ast.File, error) {
+	// This init holds all variable initializations.
+	//
+	// func busyboxInit0() {}
+	varInit := &ast.FuncDecl{
+		Name: p.nextInit(true),
+		Type: &ast.FuncType{
+			Params:  &ast.FieldList{},
+			Results: nil,
+		},
+		Body: &ast.BlockStmt{},
+	}
+
+	var mainFile *ast.File
+	for _, sourceFile := range p.Pkg.Syntax {
+		if hasMainFile := p.rewriteFile(sourceFile); hasMainFile {
+			mainFile = sourceFile
+		}
+	}
+	if !p.library && mainFile == nil {
+		return nil, nil, fmt.Errorf("no main function found in package %q", p.Pkg.PkgPath)
+	}
+
+	// Add variable initializations to Init0 in the right order.
+	for _, initStmt := range p.Pkg.TypesInfo.InitOrder {
+		a, ok := p.initAssigns[initStmt.Rhs]
+		if !ok {
+			return nil, nil, fmt.Errorf("couldn't find init assignment %s", initStmt)
+		}
+		varInit.Body.List = append(varInit.Body.List, a)
+	}
+	return varInit, mainFile, nil
+}
+
+// RewriteLibrary rewrites p into destDir as a package whose initialization
+// runs when a command that imports it is dispatched.
+//
+// deps are the hooks of p's direct deferred imports, which p's own hook calls
+// before running anything of its own.
+func (p *Package) RewriteLibrary(destDir string, deps []Hook) error {
+	if !p.library {
+		return fmt.Errorf("package %q was not created as a library", p.Pkg.PkgPath)
+	}
+
+	varInit, _, err := p.hoistInit()
+	if err != nil {
+		return err
+	}
+
+	// The gathered calls name only package-scope functions, so this may go
+	// in any of the package's files. The first is chosen because
+	// go/packages reports them in a fixed order, and two builds of one
+	// input have to generate the same tree.
+	if len(p.Pkg.Syntax) == 0 {
+		return fmt.Errorf("package %q has no Go files to rewrite", p.Pkg.PkgPath)
+	}
+	p.Pkg.Syntax[0].Decls = append(p.Pkg.Syntax[0].Decls, varInit)
+
+	if err := WritePkg(p.Pkg, destDir); err != nil {
+		return err
+	}
+	return p.writeHook(destDir, deps)
+}
+
+// writeHook writes destDir/bbinit.go, holding p's hook and the boolean that
+// keeps it to one run.
+//
+// It is a file of its own rather than more declarations in one of p's, so
+// that the import statements the hook needs do not have to be merged into a
+// file that may already import some of those paths under names of its own.
+// It is also where someone debugging a generated tree looks first.
+func (p *Package) writeHook(destDir string, deps []Hook) error {
+	var b strings.Builder
+	fmt.Fprintf(&b, "// Code generated by gobusybox for %s. DO NOT EDIT.\n\n", p.Pkg.PkgPath)
+	fmt.Fprintf(&b, "package %s\n\n", p.Pkg.Name)
+
+	aliases := p.importAliases(&b, deps)
+
+	fmt.Fprintf(&b, "// %s records that %s has run, so that the second and later\n", p.hookDone, p.hookName)
+	fmt.Fprintf(&b, "// calls return immediately. A package reached by two paths through the\n")
+	fmt.Fprintf(&b, "// import graph is initialized once, as Go initializes it once.\n")
+	fmt.Fprintf(&b, "var %s bool\n\n", p.hookDone)
+
+	fmt.Fprintf(&b, "// %s runs this package's initialization: the hooks of its direct\n", p.hookName)
+	fmt.Fprintf(&b, "// imports first, then its own package-level variables, then the bodies of\n")
+	fmt.Fprintf(&b, "// its init functions.\n")
+	fmt.Fprintf(&b, "func %s() {\n", p.hookName)
+	fmt.Fprintf(&b, "\tif %s {\n\t\treturn\n\t}\n", p.hookDone)
+	fmt.Fprintf(&b, "\t%s = true\n", p.hookDone)
+	for i, dep := range deps {
+		fmt.Fprintf(&b, "\t%s.%s()\n", aliases[i], dep.FuncName)
+	}
+	for _, call := range p.initCalls {
+		fmt.Fprintf(&b, "\t%s()\n", call)
+	}
+	fmt.Fprintf(&b, "}\n")
+
+	return writeGoFile(filepath.Join(destDir, p.generatedFileName("bbinit")), []byte(b.String()))
+}
+
+// importAliases writes the import block for deps and returns the alias chosen
+// for each, in the same order.
+//
+// Every import is aliased. The hook calls a package by that alias, so letting
+// the path decide the name would mean knowing what each package calls itself,
+// which is not always the last element of its path.
+func (p *Package) importAliases(b *strings.Builder, deps []Hook) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	aliases := make([]string, len(deps))
+	b.WriteString("import (\n")
+	for i, dep := range deps {
+		aliases[i] = p.newFunctionName(fmt.Sprintf("bbdep%d", i))
+		fmt.Fprintf(b, "\t%s %s\n", aliases[i], strconv.Quote(dep.ImportPath))
+	}
+	b.WriteString(")\n\n")
+	return aliases
+}
+
+// generatedFileName returns a file name in destDir that none of p's own
+// files already uses.
+//
+// A package may have a file called bbinit.go of its own -- it is an ordinary
+// name and nothing reserves it. Writing over it loses whatever was in it, and
+// quietly: WritePkg has already written the package's real files by the time
+// this runs, and the hoisted variable initializers are appended to whichever
+// file sorts first, which "bbinit.go" very often does. The result compiles
+// only by accident, and when it does not the error is `undefined:
+// busyboxInit0`, which names neither the file nor the collision.
+func (p *Package) generatedFileName(want string) string {
+	taken := make(map[string]bool, len(p.Pkg.GoFiles)+len(p.Pkg.OtherFiles))
+	for _, f := range p.Pkg.GoFiles {
+		taken[filepath.Base(f)] = true
+	}
+	for _, f := range p.Pkg.OtherFiles {
+		taken[filepath.Base(f)] = true
+	}
+
+	name := want + ".go"
+	for i := 0; taken[name]; i++ {
+		name = fmt.Sprintf("%s%d.go", want, i)
+	}
+	return name
 }
 
 // WritePkg writes p's files into destDir.
@@ -512,37 +776,28 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 // Rewrite rewrites p into destDir as a bb package, rewriting its init and main
 // functions.
 //
-// bbImportPath is the import path to use for bbmain.
-func (p *Package) Rewrite(destDir, bbImportPath string) error {
-	// This init holds all variable initializations.
+// bbImportPath is the import path to use for bbmain. deps are the hooks of
+// the command's direct deferred imports, empty unless this build defers
+// something.
+func (p *Package) Rewrite(destDir, bbImportPath string, deps []Hook) error {
+	varInit, mainFile, err := p.hoistInit()
+	if err != nil {
+		return err
+	}
+
+	// The deferred packages are initialized before anything of this
+	// command's, because the command's own variables may read them. Go had
+	// that order already: an imported package is finished in full before
+	// the importing package's variables are initialized.
 	//
-	// func busyboxInit0() {}
-	varInit := &ast.FuncDecl{
-		Name: p.nextInit(true),
-		Type: &ast.FuncType{
-			Params:  &ast.FieldList{},
-			Results: nil,
-		},
-		Body: &ast.BlockStmt{},
-	}
-
-	var mainFile *ast.File
-	for _, sourceFile := range p.Pkg.Syntax {
-		if hasMainFile := p.rewriteFile(sourceFile); hasMainFile {
-			mainFile = sourceFile
-		}
-	}
-	if mainFile == nil {
-		return fmt.Errorf("no main function found in package %q", p.Pkg.PkgPath)
-	}
-
-	// Add variable initializations to Init0 in the right order.
-	for _, initStmt := range p.Pkg.TypesInfo.InitOrder {
-		a, ok := p.initAssigns[initStmt.Rhs]
-		if !ok {
-			return fmt.Errorf("couldn't find init assignment %s", initStmt)
-		}
-		varInit.Body.List = append(varInit.Body.List, a)
+	// The call is prepended rather than appended for the same reason, and
+	// it names nothing but a package-scope function, so the import it
+	// needs can live in the generated file that declares it.
+	deferredInit := p.deferredInitName(deps)
+	if deferredInit != "" {
+		p.init.Body.List = append([]ast.Stmt{
+			&ast.ExprStmt{X: &ast.CallExpr{Fun: ast.NewIdent(deferredInit)}},
+		}, p.init.Body.List...)
 	}
 
 	// import bbmain "bbImportPath"
@@ -577,7 +832,45 @@ func (p *Package) Rewrite(destDir, bbImportPath string) error {
 
 	mainFile.Decls = append(mainFile.Decls, varInit, p.init, bbRegisterSelf)
 
-	return WritePkg(p.Pkg, destDir)
+	if err := WritePkg(p.Pkg, destDir); err != nil {
+		return err
+	}
+	return p.writeDeferredInit(destDir, deferredInit, deps)
+}
+
+// deferredInitName is the name of the generated function that runs this
+// command's deferred imports, empty when there are none -- which is every
+// command in a busybox built without -lazy-init.
+func (p *Package) deferredInitName(deps []Hook) string {
+	if len(deps) == 0 {
+		return ""
+	}
+	return p.newFunctionName("busyboxInitDeferred")
+}
+
+// writeDeferredInit writes destDir/bbinit.go, holding the function that runs
+// the initialization of the deferred packages this command imports.
+func (p *Package) writeDeferredInit(destDir, name string, deps []Hook) error {
+	if name == "" {
+		return nil
+	}
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "// Code generated by gobusybox for %s. DO NOT EDIT.\n\n", p.Pkg.PkgPath)
+	fmt.Fprintf(&b, "package %s\n\n", p.PackageName())
+
+	aliases := p.importAliases(&b, deps)
+
+	fmt.Fprintf(&b, "// %s runs the initialization of the packages this command\n", name)
+	fmt.Fprintf(&b, "// imports whose initialization was deferred. Their own hooks reach the rest\n")
+	fmt.Fprintf(&b, "// of the graph, so only the direct imports are named here.\n")
+	fmt.Fprintf(&b, "func %s() {\n", name)
+	for i, dep := range deps {
+		fmt.Fprintf(&b, "\t%s.%s()\n", aliases[i], dep.FuncName)
+	}
+	fmt.Fprintf(&b, "}\n")
+
+	return writeGoFile(filepath.Join(destDir, p.generatedFileName("bbinit")), []byte(b.String()))
 }
 
 func writeFile(path string, fset *token.FileSet, f *ast.File) error {

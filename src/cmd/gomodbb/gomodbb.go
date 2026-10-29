@@ -32,6 +32,7 @@ import (
 	"github.com/dustin/go-humanize"
 	"github.com/u-root/gobusybox/src/pkg/bb"
 	"github.com/u-root/gobusybox/src/pkg/golang"
+	"github.com/u-root/gobusybox/src/pkg/uflag"
 )
 
 var (
@@ -41,6 +42,12 @@ var (
 	keep       = flag.Bool("k", false, "Keep generated source temporary directory")
 	list       = flag.Bool("l", false, "List the commands the patterns match, and build nothing")
 	keepModule = flag.String("mod-dir", "", "Write the module that requires the patterns here, and keep it")
+
+	// The same flag makebb has, and the same engine behind it. gomodbb
+	// resolves its packages differently -- inside a synthetic module, over
+	// a read-only module cache -- but the rewrite is bb.BuildBusybox's and
+	// there is only one of those.
+	lazyInit uflag.Strings
 )
 
 // synthModulePath is the module written to require the requested patterns.
@@ -429,6 +436,8 @@ func mainPackages(env *golang.Environ, p pattern) ([]string, error) {
 }
 
 func main() {
+	flag.Var(&lazyInit, "lazy-init", "Import path of a library whose init runs for the commands that import it, rather than at program start. Repeatable. Experimental.")
+
 	bopts := &golang.BuildOpts{}
 	bopts.RegisterFlags(flag.CommandLine)
 	env := golang.Default()
@@ -528,6 +537,7 @@ func main() {
 		BinaryPath:   o,
 		GoBuildOpts:  bopts,
 		GenerateOnly: *genOnly,
+		LazyInit:     lazyInit,
 	}
 	if err := bb.BuildBusybox(l, opts); err != nil {
 		remove = false

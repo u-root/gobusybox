@@ -53,11 +53,29 @@ _Avoid_: shebang, hashbang
 
 **Rewrite**:
 The source-to-source transformation that turns a command into an importable
-package with no global side effects. Only commands are rewritten; the packages
-they import are copied without rewriting, re-emitted from their own syntax
-trees, and only for the files that survive the build constraints. The method is
-`bbinternal.Package.Rewrite`.
+package with no global side effects. Every command is rewritten, by
+`bbinternal.Package.Rewrite`. A library is rewritten only when `-lazy-init`
+names it or something it imports, by `bbinternal.Package.RewriteLibrary`,
+which keeps the package's own name and import path and gives it a hook; every
+other package they import is copied without rewriting, re-emitted from its own
+syntax tree, and only for the files that survive the build constraints.
 _Avoid_: transform, compile, codegen
+
+**Hook**:
+The exported function a rewritten library gains, which runs that package's
+initialization when a command that imports it is dispatched. It calls the
+hooks of the package's direct imports first, then the package's own hoisted
+variables and `init` bodies, and a generated package-level boolean makes the
+second and later calls return immediately. Emitted as `BusyboxInit`, in a
+generated `bbinit.go`. See [ADR 0004](docs/adr/0004-library-init-runs-for-the-command-that-needs-it.md).
+_Avoid_: initializer, callback, trampoline, thunk
+
+**Deferred**:
+Said of a library whose initialization has moved into its hook, so that it
+runs for the command that imports it rather than for every command in the
+busybox. The complement of the eager set over the busybox's libraries: a
+command is neither, its initialization already waiting for its own dispatch.
+_Avoid_: lazy package, delayed, postponed
 
 **Registered main**:
 The function a command's `main` is renamed to, so that calling it becomes an
@@ -73,7 +91,8 @@ _Avoid_: setup, bootstrap
 One of the numbered functions the rewrite produces, emitted as `busyboxInitN`.
 The first holds the calls to the hoisted global variable initializers, in init
 order; each of the rest holds either the body of an original `init` or the
-assignment hoisted out of one global variable.
+assignment hoisted out of one global variable. A command reaches them through
+its registered init and a rewritten library through its hook.
 _Avoid_: initN, init function
 
 **Init order**:
@@ -88,9 +107,12 @@ any command is dispatched, rather than when a command that imports them is.
 It is a closure, not a per-package decision: an eager package initializes
 before every deferred one, so everything an eager package imports is eager
 too. Standard library packages are always in it, as are packages carrying
-`//go:linkname` or an assembly file, and the packages a two-argument
-`//go:linkname` names. Decided by `lazyinit.Plan`, which reports membership
-through `Eager` and the reason through `EagerReason`.
+`//go:linkname`, an assembly file or a `.syso` object, packages whose hoisted
+variables would have a type they cannot name, and the packages a two-argument
+`//go:linkname` names. A command is never in it, being rewritten whatever its
+own source carries. Decided by `lazyinit.Plan`, which reports membership
+through `Eager`, the reason through `EagerReason`, and why a named package
+will not move through `CannotDefer`.
 _Avoid_: eager flag, eager list, non-lazy set
 
 **Registry**:
