@@ -44,7 +44,121 @@ var (
 	versionFlag = flag.String("v", "", "Go version for workspace file")
 )
 
-func run(dir string, args []string, paths []string) {
+// moduleGoVersion returns the go directive of the go.mod in dir, or "" if it
+// declares none.
+func moduleGoVersion(dir string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
+	if err != nil {
+		return "", err
+	}
+	f, err := modfile.ParseLax(filepath.Join(dir, "go.mod"), b, nil)
+	if err != nil {
+		return "", err
+	}
+	if f.Go == nil {
+		return "", nil
+	}
+	return f.Go.Version, nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		log.Fatalf("Exited with %v", err)
+	}
+}
+
+func run() error {
+	flag.Parse()
+	log.SetPrefix("[goanywhere] ")
+
+	args := flag.Args()
+	if len(args) == 0 {
+		return fmt.Errorf("usage: goanywhere $pkg... -- <command> ...")
+	}
+	dashIndex := slices.Index(args, "--")
+	if dashIndex == -1 {
+		return fmt.Errorf("must use -- to distinguish Go packages from command. Usage: goanywhere $pkg... -- <command> ...")
+	}
+	if len(args) == dashIndex+1 {
+		return fmt.Errorf("must provide command to run. Usage: goanywhere $pkg... -- <command> ...")
+	}
+	pkgs := args[:dashIndex]
+	args = args[dashIndex+1:]
+
+	env := golang.Default()
+	paths := findpkg.GlobPaths(ulog.Log, findpkg.DefaultEnv(), pkgs...)
+	mods, noModulePaths := findpkg.Modules(paths)
+
+	if env.GO111MODULE == "off" {
+		return fmt.Errorf("GO111MODULE=off is not supported: goanywhere exists to generate a go.work, which GOPATH mode cannot use. Unset GO111MODULE, or set it to on.")
+	}
+
+	if len(noModulePaths) > 0 {
+		return fmt.Errorf("no modules found for %v", noModulePaths)
+	}
+
+	var dir string
+	if *tmp {
+		var err error
+		dir, err = os.MkdirTemp("", "goanywhere-")
+		if err != nil {
+			return fmt.Errorf("could not create temp dir: %w", err)
+		}
+		defer os.RemoveAll(dir)
+	}
+
+	if *versionFlag == "" {
+		v, err := env.Version()
+		if err != nil {
+			v = runtime.Version()
+		}
+		*versionFlag = golang.MajorMinorGoVersion(v, "")
+		if *versionFlag == "" {
+			return fmt.Errorf("could not determine version from %v (set a version with -v flag)", v)
+		}
+	}
+
+	// A go.work must declare a go version at least as high as every module
+	// it uses, or the go tool refuses to load the workspace with
+	// "module X requires go >= Y, but go.work lists go Z".
+	//
+	// This runs even when -v was given. An explicit version is a baseline,
+	// not a ceiling: honouring "-v 1.25" against a member declaring
+	// "go 1.26.6" would emit a workspace the go tool rejects outright.
+	for mdir := range mods {
+		mv, err := moduleGoVersion(mdir)
+		if err != nil {
+			return fmt.Errorf("could not read go.mod in %s: %w", mdir, err)
+		}
+		if golang.CompareGoVersions(mv, *versionFlag) > 0 {
+			*versionFlag = mv
+		}
+	}
+
+	tpl := `go {{.Version}}
+
+use ({{range .Modules}}
+	{{.}}
+{{end}})
+`
+
+	vars := struct {
+		Version string
+		Modules []string
+	}{
+		Version: *versionFlag,
+		Modules: maps.Keys(mods),
+	}
+	t := template.Must(template.New("tpl").Parse(tpl))
+	var b bytes.Buffer
+	if err := t.Execute(&b, vars); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "go.work"), b.Bytes(), 0o644); err != nil {
+		return err
+	}
+	defer os.Remove(filepath.Join(dir, "go.work"))
+
 	var relPaths []string
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
@@ -68,121 +182,5 @@ func run(dir string, args []string, paths []string) {
 	c := exec.Command(args[0], append(args[1:], relPaths...)...)
 	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
 	c.Dir = dir
-	if err := c.Run(); err != nil {
-		log.Fatalf("Exited with %v", err)
-		os.Exit(1)
-	}
-	os.Exit(0)
-}
-
-// moduleGoVersion returns the go directive of the go.mod in dir, or "" if it
-// declares none.
-func moduleGoVersion(dir string) (string, error) {
-	b, err := os.ReadFile(filepath.Join(dir, "go.mod"))
-	if err != nil {
-		return "", err
-	}
-	f, err := modfile.ParseLax(filepath.Join(dir, "go.mod"), b, nil)
-	if err != nil {
-		return "", err
-	}
-	if f.Go == nil {
-		return "", nil
-	}
-	return f.Go.Version, nil
-}
-
-func main() {
-	flag.Parse()
-	log.SetPrefix("[goanywhere] ")
-
-	args := flag.Args()
-	if len(args) == 0 {
-		log.Fatalf("Usage: goanywhere $pkg... -- <command> ...")
-	}
-	dashIndex := slices.Index(args, "--")
-	if dashIndex == -1 {
-		log.Fatalf("Must use -- to distinguish Go packages from command. Usage: goanywhere $pkg... -- <command> ...")
-	}
-	if len(args) == dashIndex+1 {
-		log.Fatalf("Must provide command to run. Usage: goanywhere $pkg... -- <command> ...")
-	}
-	pkgs := args[:dashIndex]
-	args = args[dashIndex+1:]
-
-	env := golang.Default()
-	paths := findpkg.GlobPaths(ulog.Log, findpkg.DefaultEnv(), pkgs...)
-	mods, noModulePaths := findpkg.Modules(paths)
-
-	if env.GO111MODULE == "off" {
-		log.Fatalf("GO111MODULE=off is not supported: goanywhere exists to generate a go.work, which GOPATH mode cannot use. Unset GO111MODULE, or set it to on.")
-	}
-
-	if len(noModulePaths) > 0 {
-		log.Fatalf("No modules found for %v", noModulePaths)
-	}
-
-	var dir string
-	if *tmp {
-		var err error
-		dir, err = os.MkdirTemp("", "goanywhere-")
-		if err != nil {
-			log.Fatalf("Could not create temp dir: %v", err)
-		}
-		defer os.RemoveAll(dir)
-	}
-
-	if *versionFlag == "" {
-		v, err := env.Version()
-		if err != nil {
-			v = runtime.Version()
-		}
-		*versionFlag = golang.MajorMinorGoVersion(v, "")
-		if *versionFlag == "" {
-			log.Fatalf("Could not determine version from %v (set a version with -v flag)", v)
-		}
-	}
-
-	// A go.work must declare a go version at least as high as every module
-	// it uses, or the go tool refuses to load the workspace with
-	// "module X requires go >= Y, but go.work lists go Z".
-	//
-	// This runs even when -v was given. An explicit version is a baseline,
-	// not a ceiling: honouring "-v 1.25" against a member declaring
-	// "go 1.26.6" would emit a workspace the go tool rejects outright.
-	for dir := range mods {
-		mv, err := moduleGoVersion(dir)
-		if err != nil {
-			log.Fatalf("Could not read go.mod in %s: %v", dir, err)
-		}
-		if golang.CompareGoVersions(mv, *versionFlag) > 0 {
-			*versionFlag = mv
-		}
-	}
-
-	tpl := `go {{.Version}}
-
-use ({{range .Modules}}
-	{{.}}{{end}}
-)
-`
-
-	vars := struct {
-		Version string
-		Modules []string
-	}{
-		Version: *versionFlag,
-		Modules: maps.Keys(mods),
-	}
-	t := template.Must(template.New("tpl").Parse(tpl))
-	var b bytes.Buffer
-	if err := t.Execute(&b, vars); err != nil {
-		log.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "go.work"), b.Bytes(), 0o644); err != nil {
-		log.Fatal(err)
-	}
-	defer os.Remove(filepath.Join(dir, "go.work"))
-
-	run(dir, args, paths)
+	return c.Run()
 }
