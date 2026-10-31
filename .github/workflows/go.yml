@@ -233,6 +233,121 @@ jobs:
           fail_ci_if_error: true
           verbose: true
 
+  test-crossarch:
+    name: test-crossarch
+    runs-on: ubuntu-26.04
+    strategy:
+      # arm64 and riscv64 fail independently; one breaking should not hide
+      # whether the other still works.
+      fail-fast: false
+      matrix:
+        goversion: ['1.27.x']
+        goarch: ['arm64', 'riscv64']
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: ${{ matrix.goversion }}
+          # Same two modules as the gobuilds job: this builds src/cmd/makebb
+          # and runs the tests in test/.
+          cache-dependency-path: |
+            src/go.sum
+            test/go.sum
+
+      - name: Allow toolchain selection
+        run: echo "GOTOOLCHAIN=auto" >> "$GITHUB_ENV"
+
+      # Only the two interpreters are wanted, so the .deb is unpacked rather
+      # than installed: qemu-user depends on ubuntu-virt, which pulls the
+      # whole qemu-system stack for about 100 MB to get 11 MB of use.
+      #
+      # The interpreters are static-pie and depend on nothing, so unpacking
+      # them anywhere is enough.
+      #
+      # Do not pin the version. The apt index can name a build the pool
+      # mirror does not carry yet, and `apt-get download qemu-user=<version>`
+      # then fails with a 404 that reads like the package is missing.
+      - name: Install qemu user-mode emulation
+        run: |
+          set -eux
+          sudo apt-get update
+          cd "$RUNNER_TEMP"
+          apt-get download qemu-user
+          dpkg -x qemu-user_*.deb qemu
+
+      # binfmt_misc, not a wrapper on PATH, because the suite spawns foreign
+      # binaries rather than running one: the test binary execs makebb, which
+      # execs the busybox. qemu-user hands execve to the host kernel instead
+      # of re-entering itself, so a nested exec of a foreign binary fails with
+      # "exec format error" unless the kernel knows the interpreter.
+      #
+      # The magic matches an ELF header up to e_machine; only the two bytes at
+      # offset 18 differ between architectures. The F flag makes the kernel
+      # open the interpreter now and hold it, so the path need not stay
+      # resolvable later, and a path that is already wrong fails here.
+      - name: Register the interpreter with binfmt_misc
+        run: |
+          set -eux
+          case "${{ matrix.goarch }}" in
+            arm64)   qemu=qemu-aarch64; machine='\xb7\x00' ;;
+            riscv64) qemu=qemu-riscv64; machine='\xf3\x00' ;;
+            *)       echo "no interpreter known for ${{ matrix.goarch }}"; exit 1 ;;
+          esac
+          elf='\x7f\x45\x4c\x46\x02\x01\x01\x00\x00\x00\x00\x00\x00\x00\x00\x00\x02\x00'
+          mask='\xff\xff\xff\xff\xff\xff\xff\x00\xff\xff\xff\xff\xff\xff\xff\xff\xfe\xff\xff\xff'
+          reg=":$qemu:M::$elf$machine:$mask:$RUNNER_TEMP/qemu/usr/bin/$qemu:POCF"
+          # The escapes have to still be text when the kernel reads them,
+          # because the kernel is what decodes them. bash's printf decodes \x
+          # and dash's does not, so writing this through a format string
+          # rather than an argument emits raw NUL bytes under bash alone. The
+          # kernel then registers something other than what is written here,
+          # one that matches host binaries, and every later step dies with
+          # "Exec format error" -- including the runner's own bash, which
+          # leaves a job that cannot say what went wrong. Check before
+          # writing: afterwards is too late to run a command that reports it.
+          case "$reg" in
+            *'\x7f\x45\x4c\x46'*) ;;
+            *) echo "the ELF magic was decoded before the kernel saw it"; exit 1 ;;
+          esac
+          printf '%s\n' "$reg" | sudo tee /proc/sys/fs/binfmt_misc/register > /dev/null
+          # And confirm what landed, while this shell can still run programs.
+          grep -qx "magic $(printf '%s' "$elf$machine" | sed 's/\\x//g')" \
+            "/proc/sys/fs/binfmt_misc/$qemu"
+          /bin/true
+
+      # Both halves are load-bearing, and neither is implied by the suite
+      # passing.
+      #
+      # GOARCH equal to GOHOSTARCH would run the whole job natively and pass
+      # without emulating anything, which is the way this job rots: it would
+      # still be green and would guard nothing.
+      #
+      # The smoke test fails here, naming binfmt, rather than surfacing three
+      # minutes later as an "exec format error" from inside a fixture.
+      - name: Check that the job is actually emulating something
+        run: |
+          set -eux
+          export GOARCH=${{ matrix.goarch }}
+          test "$(go env GOARCH)" = "${{ matrix.goarch }}"
+          test "$(go env GOARCH)" != "$(go env GOHOSTARCH)"
+          mkdir -p "$RUNNER_TEMP/smoke"
+          cd "$RUNNER_TEMP/smoke"
+          printf 'package main\n\nimport (\n\t"fmt"\n\t"runtime"\n)\n\nfunc main() { fmt.Println(runtime.GOARCH) }\n' > main.go
+          printf 'module smoke\n\ngo 1.27.0\n' > go.mod
+          go build -o smoke .
+          test "$(./smoke)" = "${{ matrix.goarch }}"
+
+      # The whole suite, unchanged. GOARCH reaches the go tool, so the test
+      # binary, makebb and every generated busybox are built for the target
+      # and run under the interpreter, while the compiler stays native and
+      # builds at full speed.
+      - name: Test
+        run: cd test && go test -timeout 60m -v ./...
+        env:
+          GOARCH: ${{ matrix.goarch }}
+
   test-external-workspaces:
     name: test-external-workspaces
     runs-on: ubuntu-26.04

@@ -29,6 +29,7 @@ so the suite needs no version control tool installed.
 | `injectldvar/` | `-ldflags -X` reaching a variable through the rewrite |
 | `12-fancy-cmd/` | A command whose name is not a valid Go identifier |
 | `nested/` | A module inside another module's directory |
+| `libinit/` | Library `init` and package-level variables, visible in output |
 | `resolve-modules/` | Resolving patterns to modules, for `findpkg` |
 
 ### diamonddep
@@ -95,6 +96,48 @@ and the case fails: the go tool reports that the main module does not contain
 
 The outer module alone is what the "How It Works" section of the top-level
 `README.md` builds.
+
+### libinit
+
+The only fixture whose library packages have anything to initialize. Every
+other one here is commands plus libraries holding a function and nothing else,
+so none of them can tell a library whose `init` ran from one whose `init` was
+skipped.
+
+Each of `pkg/shared`, `pkg/lonely` and `pkg/dependent` has a package-level
+variable and an `init`, and each records what it could already see when it
+ran. The commands print those records, so the order and the fact of
+initialization both reach the output:
+
+```
+cmd/first  -> pkg/lonely          (reached by this command only)
+           -> pkg/shared
+cmd/second -> pkg/dependent -> pkg/shared
+           -> pkg/shared
+```
+
+`pkg/lonely` is reached by one command and not the other, which is the
+ordinary case rather than a contrived one: of the 228 library packages in the
+120-command u-root busybox, 125 are reached by exactly one command, and every
+command pays for all of them today.
+
+Two details of how the records are written are what give them teeth, and both
+are easy to undo by accident:
+
+- `pkg/dependent`'s variable reads `shared.FromInit`, not `shared.Var`. Go
+  finishes an imported package entirely, variables and `init` both, before the
+  importer's variables run. Reading `shared.Var` would also be satisfied by
+  running shared's variables, then dependent's, then shared's `init` — an
+  order Go never produces, which the fixture would then not notice.
+- Each `init` appends to its record rather than assigning. `cmd/second`
+  reaches `pkg/shared` twice over, directly and through `pkg/dependent`, so
+  assigning would leave an `init` that ran twice looking exactly like one that
+  ran once.
+
+Printing the records rather than checking them another way is deliberate.
+Once a library's `init` becomes a function the dispatched command calls, it no
+longer appears in `GODEBUG=inittrace=1` at all, whether it was called or
+silently skipped, so the output is the only thing that can tell those apart.
 
 ### resolve-modules
 

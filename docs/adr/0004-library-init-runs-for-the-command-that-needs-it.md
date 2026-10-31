@@ -55,8 +55,28 @@ construction, since a package may always import what it already imports.
 
 The order this produces is a depth-first walk, with each package's direct
 imports taken in import path order so that two builds of one input agree. It
-puts every package after all of its imports, which is the whole of what Go
-guarantees.
+puts every package after all of its imports.
+
+That is not the order Go itself would have used, and the hooks cannot be made
+to produce it. The specification fixes a total order rather than merely a
+partial one: given the list of all packages sorted by import path, each step
+initializes the first uninitialized package whose imports are all initialized
+already. Because a hook calls only its own direct imports' hooks, a package's
+deferred imports are always initialized contiguously with it, while Go's rule
+interleaves them. The smallest graph that tells the two apart:
+
+```
+cmd -> a -> c         Go:        c d b e a
+         -> e         the hooks: c e a d b   or   d b c e a
+    -> b -> d
+```
+
+`d` and `b` fall inside `a`'s subtree, so no ordering of the command's own
+hook calls reproduces Go's, and reordering the walk on its own would only
+make it stop describing the generated code. Both orders put every package
+after all of its imports, which is what a program can rely on without
+declaring the dependency by importing it. The difference is recorded under
+Consequences, because it is observable.
 
 A package is deferred **entirely or not at all**: its hoisted package-level
 variable initializers and its `init` bodies move into the hook together, in
@@ -103,11 +123,15 @@ target has been initialized. **The target package of a two-argument
 there as usual.
 
 That is completeness rather than a repair. Scanning a grpc-serving command's
-101 non-standard packages finds one two-argument pull,
-`golang.org/x/sys/unix` reaching `syscall.prlimit`, whose target is a standard
-library package and so eager already. Every other such pull in the build is in
-the standard library reaching the runtime. The rule costs nothing to state and
-the scanner has to look at the directive anyway.
+101 non-standard packages finds three two-argument pulls, all of them in
+`golang.org/x/sys/unix`: `runtime.getAuxv`, `syscall.prlimit` and
+`runtime.vgetrandom`. Every one of those targets is a standard library
+package and so eager already, and every other such pull in the build is in
+the standard library reaching the runtime. The count is per build rather than
+per module, because the scanner reads the directives go/packages has already
+filtered by build constraints; this one is linux/amd64 against x/sys v0.38.0.
+The rule costs nothing to state and the scanner has to look at the directive
+anyway.
 
 Importing `unsafe` is **not** on that list, though it is the obvious third
 candidate. `unsafe` lets a package do what it likes to memory it already has;
@@ -191,6 +215,19 @@ every command in the busybox whether or not it has ever heard of protobuf.
   which only about 365 KB is `init` heap; the rest is text the linker keeps
   whether or not anything calls it. Deferring `init` recovers the former and
   none of the latter.
+
+- Deferred packages initialize in a valid Go initialization order, but not in
+  the one Go itself would have chosen. Every package still runs after
+  everything it imports; two packages that do not import one another may swap,
+  for the reason given under How. So a program whose packages have
+  order-dependent side effects that they do not declare by importing one
+  another can observe the difference. That is the smaller of the two changes
+  this decision makes to when a package initializes -- the larger is that a
+  deferred `init` runs after program start rather than before `main` -- and
+  `-lazy-init` is off by default. It is a semantic change all the same, not an
+  implementation detail. `lazyinit.CallOrder`'s documentation and
+  `TestCallOrderDiffersFromGosPackageInitializationOrder` hold the detail and
+  the measured example.
 
 - This depends on [0003](0003-one-command-runs-per-process.md). If a busybox
   ever dispatches twice in one process, a deferred `init` runs twice where Go
