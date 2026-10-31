@@ -240,7 +240,7 @@ func (c Environ) build(dirPath string, binaryPath string, pattern []string, opts
 		args = append(args, "-mod", string(c.Mod))
 	}
 	if c.InstallSuffix != "" {
-		args = append(args, "-installsuffix", c.Context.InstallSuffix)
+		args = append(args, "-installsuffix", c.InstallSuffix)
 	}
 
 	switch c.Compiler.Type {
