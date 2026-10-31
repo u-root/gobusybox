@@ -207,8 +207,8 @@ func (c *Environ) Lookup(mode packages.LoadMode, patterns ...string) ([]*package
 		Env:  append(os.Environ(), c.Env()...),
 		Dir:  c.Dir,
 	}
-	if len(c.Context.BuildTags) > 0 {
-		tags := fmt.Sprintf("-tags=%s", strings.Join(c.Context.BuildTags, ","))
+	if len(c.BuildTags) > 0 {
+		tags := fmt.Sprintf("-tags=%s", strings.Join(c.BuildTags, ","))
 		cfg.BuildFlags = []string{tags}
 	}
 	if c.GO111MODULE != "off" && len(c.Mod) > 0 {
