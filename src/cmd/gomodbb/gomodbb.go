@@ -31,6 +31,7 @@ import (
 
 	"github.com/dustin/go-humanize"
 	"github.com/u-root/gobusybox/src/pkg/bb"
+	"github.com/u-root/gobusybox/src/pkg/bb/findpkg"
 	"github.com/u-root/gobusybox/src/pkg/golang"
 )
 
@@ -77,13 +78,6 @@ func (p pattern) fetchSpec() string {
 	return p.fetchPath() + "@" + p.query
 }
 
-// couldBeGlob reports whether an element is a path.Match pattern rather than a
-// literal. It is findpkg's test, repeated so that gomodbb and the build agree
-// on which patterns are globs.
-func couldBeGlob(s string) bool {
-	return strings.ContainsAny(s, "*?[") || strings.Contains(s, `\\`)
-}
-
 // fetchPath returns the package pattern in a form the go command accepts.
 //
 // The go command knows "...", which descends, but not the "*" that matches a
@@ -94,7 +88,7 @@ func couldBeGlob(s string) bool {
 func (p pattern) fetchPath() string {
 	elems := strings.Split(p.path, "/")
 	for i, e := range elems {
-		if couldBeGlob(e) {
+		if findpkg.IsGlob(e) {
 			// elems[:i:i] so that appending copies rather than
 			// overwriting the element the glob was found in.
 			return strings.Join(append(elems[:i:i], "..."), "/")
@@ -108,7 +102,7 @@ func (p pattern) fetchPath() string {
 // Only a widened pattern needs narrowing. Anything else was handed to the go
 // command as written, so whatever came back already matched it.
 func (p pattern) matches(pkgPath string) (bool, error) {
-	if !couldBeGlob(p.path) {
+	if !findpkg.IsGlob(p.path) {
 		return true, nil
 	}
 	return path.Match(p.path, pkgPath)

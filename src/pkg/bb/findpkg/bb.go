@@ -314,20 +314,38 @@ func lookupPkgNameAndFiles(env *golang.Environ, patterns ...string) ([]*packages
 	return env.Lookup(packages.NeedName|packages.NeedFiles|packages.NeedModule, patterns...)
 }
 
-func couldBeGlob(s string) bool {
-	return strings.ContainsAny(s, "*?[") || strings.Contains(s, `\\`)
+// globMeta is every character path.Match gives a meaning to, and nothing
+// else: '*' and '?' are wildcards, '[' opens a character class, and '\'
+// escapes whatever follows it.
+//
+// The backslash is spelled "\\" in this interpreted string literal, which is
+// one character. A raw literal `\\` is two, and path.Match escapes with one,
+// so testing for a raw `\\` is the mistake this constant replaces.
+const globMeta = "*?[\\"
+
+// IsGlob reports whether a pattern is a path.Match pattern rather than a
+// literal package path.
+//
+// A pattern holding none of globMeta selects exactly itself and can be looked
+// up as written. One holding any of them cannot: it has to be widened to a
+// path the go command understands and narrowed again with path.Match.
+//
+// gomodbb resolves the same patterns through `go get` rather than through the
+// build, and asks this, so that a glob selects the same commands either way.
+func IsGlob(s string) bool {
+	return strings.ContainsAny(s, globMeta)
 }
 
 // lookupPkgsWithGlob resolves globs in Go package paths to a realized list of
 // Go command paths. It may return a list that contains errors.
 //
-// Precondition: couldBeGlob(pattern) is true
+// Precondition: IsGlob(pattern) is true
 func lookupPkgsWithGlob(env *golang.Environ, pattern string) ([]*packages.Package, error) {
 	elems := strings.Split(pattern, "/")
 
 	globIndex := 0
 	for i, e := range elems {
-		if couldBeGlob(e) {
+		if IsGlob(e) {
 			globIndex = i
 			break
 		}
@@ -368,7 +386,7 @@ func lookupCompilablePkgsWithGlob(l ulog.Logger, env *golang.Environ, patterns .
 	// path.Match-ing on the results. So no batching of globs.
 	var batchedPatterns []string
 	for _, pattern := range patterns {
-		if couldBeGlob(pattern) {
+		if IsGlob(pattern) {
 			ps, err := lookupPkgsWithGlob(env, pattern)
 			if err != nil {
 				return nil, err
