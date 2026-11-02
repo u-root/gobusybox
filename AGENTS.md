@@ -1,7 +1,23 @@
 # Notes for coding agents
 
 Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for layout, commit format and
-sign-off. This file holds only what is easy to get wrong.
+sign-off. This file holds the writing rules, and what is easy to get wrong.
+
+## Writing
+
+Use simple direct language everywhere outside the code. That means comments,
+commit messages, pull request titles and bodies, and issues.
+
+Leave out redundant comments. Keep one that is needed to 2 lines or fewer.
+Avoid extra colons, semicolons and dashes.
+
+Cite the source when a comment exists to satisfy an external requirement, and
+give the chapter or section number, the page, or the URL. A comment that rests
+on a measurement is different. Record the measurement in an
+[ADR](docs/adr/) and reference that ADR from the pull request.
+
+These rules govern new writing. Existing comments keep their wording, in the
+same way existing identifiers keep their names.
 
 ## Vocabulary
 
