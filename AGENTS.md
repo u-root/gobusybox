@@ -1,7 +1,8 @@
 # Notes for coding agents
 
-Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for layout, commit format and
-sign-off. This file holds only what is easy to get wrong.
+Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for layout, commit format,
+sign-off and the writing rules. This file holds only what is easy to get
+wrong.
 
 ## Vocabulary
 
@@ -12,6 +13,12 @@ to match it.
 
 Architectural decisions are in [`docs/adr/`](docs/adr/). Record a decision
 there rather than in the glossary, which is a term list and nothing more.
+
+## Writing
+
+Long comments are the default and this repository wants short ones: an inline
+comment runs to 2 lines, a doc comment as long as its reader needs. The rules
+are in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Build and test
 

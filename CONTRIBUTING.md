@@ -110,6 +110,26 @@ These checks gate a merge: `Tidy` (gofmt and `go mod tidy` drift), `Unit Test`,
 `codecov/project` reports a transient failure while other jobs are still
 uploading; wait for all jobs before believing it.
 
+## Writing
+
+Use simple direct language everywhere outside the code. That means comments,
+documentation, commit messages, pull request titles and bodies, and issues.
+
+Leave out redundant comments. Keep an inline comment that is needed to 2 lines
+or fewer, and avoid extra colons, semicolons and dashes in it. A doc comment on
+a package or an exported name is what `go doc` shows, so let it run as long as
+its reader needs.
+
+Cite the source when a comment exists to satisfy an external requirement, and
+give the chapter or section number, the page, or the URL. A comment that rests
+on a measurement is different. Record the measurement in the commit message, or
+in an [ADR](docs/adr/) when the decision it supports is architectural, and name
+that place in the comment. A reader who has to run `git blame` to learn where a
+number came from will not do it.
+
+These rules govern new writing. Existing comments keep their wording, in the
+same way existing identifiers keep their names.
+
 ## Terminology
 
 [`GLOSSARY.md`](GLOSSARY.md) settles the vocabulary for this codebase -- one
