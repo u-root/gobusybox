@@ -63,7 +63,7 @@ func TestDeferOnlyDefersTheNamedPackage(t *testing.T) {
 		if !p.Eager(eager) {
 			t.Errorf("Eager(%q) = false, want true: it was not named", eager)
 		}
-		if got, want := p.EagerReason(eager), eagerNotNamed; got != want {
+		if got, want := p.EagerReason(eager), eagerNotSelected; got != want {
 			t.Errorf("EagerReason(%q) = %q, want %q", eager, got, want)
 		}
 	}
@@ -357,5 +357,92 @@ func mine()
 	}
 	if got := p.EagerReason("gopkg.in/yaml"); !strings.Contains(got, "linkname") {
 		t.Errorf("EagerReason = %q, want the linkname reason", got)
+	}
+}
+
+// A pattern defers the subtree it selects, which is the whole of what step 5
+// adds over naming each package.
+func TestDeferOnlyAPatternDefersTheSubtree(t *testing.T) {
+	p := New(namedGraph(t), DeferOnly([]string{"example.com/m/pkg/..."}))
+
+	want := []string{
+		"example.com/m/pkg/dependent",
+		"example.com/m/pkg/lonely",
+		"example.com/m/pkg/shared",
+	}
+	if got := deferredPaths(p); !slices.Equal(got, want) {
+		t.Errorf("deferred = %v, want %v", got, want)
+	}
+}
+
+// Naming the subtree and naming each of its packages are the same request,
+// so they must produce the same plan.
+func TestAPatternAgreesWithNamingEachPackage(t *testing.T) {
+	byPattern := New(namedGraph(t), DeferOnly([]string{"example.com/m/pkg/..."}))
+	byPath := New(namedGraph(t), DeferOnly([]string{
+		"example.com/m/pkg/dependent",
+		"example.com/m/pkg/lonely",
+		"example.com/m/pkg/shared",
+	}))
+
+	if got, want := deferredPaths(byPattern), deferredPaths(byPath); !slices.Equal(got, want) {
+		t.Errorf("by pattern = %v, by path = %v", got, want)
+	}
+}
+
+// A pattern reaching a package that cannot move defers the rest rather than
+// giving up. The caller is what reports the one left behind.
+func TestAPatternDefersWhatItCanAroundARefusal(t *testing.T) {
+	refused := withOtherFiles(plain(t, "example.com/m/pkg/asm"), "empty.s")
+	ok := plain(t, "example.com/m/pkg/ok")
+	cmd := imports(plain(t, "example.com/m/cmd/one"), refused, ok)
+
+	p := New([]*packages.Package{cmd}, DeferOnly([]string{"example.com/m/pkg/..."}))
+
+	if got, want := deferredPaths(p), []string{"example.com/m/pkg/ok"}; !slices.Equal(got, want) {
+		t.Errorf("deferred = %v, want %v", got, want)
+	}
+	if why := p.CannotDefer("example.com/m/pkg/asm"); !strings.Contains(why, "assembly") {
+		t.Errorf("CannotDefer = %q, want the assembly reason rather than the not-named one", why)
+	}
+}
+
+// A pattern over a subtree holding commands and libraries together selects
+// the libraries. Commands are rewritten whatever the pattern says.
+func TestAPatternOverCommandsDefersNothing(t *testing.T) {
+	p := New(namedGraph(t), DeferOnly([]string{"example.com/m/cmd/..."}))
+
+	if got := deferredPaths(p); len(got) != 0 {
+		t.Errorf("deferred = %v, want none", got)
+	}
+}
+
+// The invariant the whole design rests on has to survive the wider selection:
+// an eager package may not import a deferred one.
+func TestAPatternKeepsTheEagerSetClosedDownward(t *testing.T) {
+	for _, pattern := range []string{
+		"...",
+		"example.com/m/pkg/...",
+		"example.com/...",
+	} {
+		t.Run(pattern, func(t *testing.T) {
+			refused := withOtherFiles(plain(t, "example.com/m/pkg/asm"), "empty.s")
+			mid := imports(plain(t, "example.com/m/pkg/mid"), refused)
+			leaf := plain(t, "example.com/m/pkg/leaf")
+			cmd := imports(plain(t, "example.com/m/cmd/one"), mid, leaf)
+
+			p := New([]*packages.Package{cmd}, DeferOnly([]string{pattern}))
+
+			for path, pkg := range p.pkgs {
+				if !p.Eager(path) {
+					continue
+				}
+				for _, imp := range sortedImports(pkg) {
+					if p.Deferred(imp) {
+						t.Errorf("eager %s imports deferred %s", path, imp)
+					}
+				}
+			}
+		})
 	}
 }

@@ -656,4 +656,122 @@ func TestLazyInitDifferentialGomodbbOffline(t *testing.T) {
 	if got := runCommand(t, candidate, "first"); !strings.Contains(got.output, ran) {
 		t.Errorf("first printed %q, which does not contain %q", got.output, ran)
 	}
+
+	// A subtree pattern decided in gomodbb's resolution context rather
+	// than makebb's. The import paths a pattern matches against are
+	// resolved inside a synthetic module over a read-only module cache
+	// here, which is the one thing about gomodbb a makebb test cannot
+	// stand in for.
+	t.Run("a subtree pattern", func(t *testing.T) {
+		subtree := build("bb-subtree", []string{"-lazy-init", modPath + "/pkg/..."})
+
+		for _, cmdName := range []string{"first", "second"} {
+			base := runCommand(t, baseline, cmdName)
+			cand := runCommand(t, subtree, cmdName)
+			compareRuns(t, cmdName, base, cand)
+
+			// Either command witnesses all three, because a
+			// busybox initializes every library it holds whichever
+			// one is dispatched. That is what the pattern undoes.
+			for _, lib := range []string{"/pkg/dependent", "/pkg/lonely", "/pkg/shared"} {
+				if !slices.Contains(base.initPackages, modPath+lib) {
+					t.Errorf("%s did not run %s's init even in the baseline, so deferring it proves nothing", cmdName, modPath+lib)
+				}
+				if slices.Contains(cand.initPackages, modPath+lib) {
+					t.Errorf("%s still runs %s's init at program start, so the subtree pattern did not reach it", cmdName, modPath+lib)
+				}
+			}
+		}
+	})
+}
+
+// TestASubtreePatternDefersTheWholeSubtree is the end-to-end guard on step 5:
+// one pattern reaching three packages, where step 4 needed three paths.
+//
+// It defers strictly more than TestADeferredInitLeavesTheStartupTrace does,
+// so it is not a restatement of it. libinit's three libraries all have an
+// init and a package-level variable whose effects reach a command's output,
+// which is what makes "they all left the startup trace" distinguishable from
+// "their initialization was dropped": the output has to be unchanged.
+func TestASubtreePatternDefersTheWholeSubtree(t *testing.T) {
+	const subtree = "github.com/u-root/gobusybox/test/libinit/pkg/..."
+	libraries := []string{
+		"github.com/u-root/gobusybox/test/libinit/pkg/dependent",
+		"github.com/u-root/gobusybox/test/libinit/pkg/lonely",
+		"github.com/u-root/gobusybox/test/libinit/pkg/shared",
+	}
+
+	f := fixtureNamed(t, "library-init")
+	mkbb := buildTool(t, "makebb")
+	dir := t.TempDir()
+	baseline := buildBusybox(t, mkbb, dir, "bb-baseline", f, nil)
+	candidate := buildBusybox(t, mkbb, dir, "bb-subtree", f, []string{"-lazy-init", subtree})
+
+	for _, cmdName := range []string{"first", "second"} {
+		t.Run(cmdName, func(t *testing.T) {
+			base := runCommand(t, baseline, cmdName)
+			cand := runCommand(t, candidate, cmdName)
+
+			// The output is what separates a deferred init from a
+			// dropped one, so it is checked first and exactly.
+			compareRuns(t, cmdName, base, cand)
+
+			for _, lib := range libraries {
+				if !slices.Contains(base.initPackages, lib) {
+					t.Errorf("%s did not run %s's init even in the baseline, so deferring it proves nothing", cmdName, lib)
+				}
+				if slices.Contains(cand.initPackages, lib) {
+					t.Errorf("%s still runs %s's init at program start, so the subtree pattern did not reach it", cmdName, lib)
+				}
+			}
+		})
+	}
+}
+
+// TestASubtreePatternThatMovesNothingIsRefused checks that leniency stops at
+// doing nothing.
+//
+// A pattern defers what it can rather than failing on the first package it
+// cannot, which is what makes a subtree usable at all. That leniency would
+// otherwise bring back the silent no-op step 4 exists to refuse: a pattern
+// matching nothing would build a busybox identical to its baseline, and every
+// comparison in this file would pass.
+func TestASubtreePatternThatMovesNothingIsRefused(t *testing.T) {
+	mkbb := buildTool(t, "makebb")
+	f := fixtureNamed(t, "library-init")
+	dir := t.TempDir()
+
+	for _, tt := range []struct {
+		name    string
+		pattern string
+		want    string
+	}{
+		{
+			name:    "a subtree no command imports",
+			pattern: "github.com/u-root/gobusybox/test/libinit/nosuchthing/...",
+			want:    "matches no library in this busybox",
+		},
+		{
+			name:    "a subtree holding only commands",
+			pattern: "github.com/u-root/gobusybox/test/libinit/cmd/...",
+			want:    "matches no library in this busybox",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"-o", filepath.Join(dir, "bb-"+t.Name())}, f.extraArgs...)
+			args = append(args, "-lazy-init", tt.pattern)
+			args = append(args, f.cmds...)
+
+			cmd := exec.Command(mkbb, args...)
+			cmd.Dir = f.wd
+			cmd.Env = append(os.Environ(), "GO111MODULE=on")
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("Building with -lazy-init %s succeeded, want a refusal:\n%s", tt.pattern, out)
+			}
+			if !strings.Contains(string(out), tt.want) {
+				t.Errorf("Building with -lazy-init %s said:\n%s\nwant a message containing %q", tt.pattern, out, tt.want)
+			}
+		})
+	}
 }

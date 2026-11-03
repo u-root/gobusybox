@@ -4,46 +4,48 @@
 
 package lazyinit
 
-// eagerNotNamed is why a package that could have been deferred is not.
-const eagerNotNamed = "is not named by -lazy-init"
+// eagerNotSelected is why a package that could have been deferred is not.
+const eagerNotSelected = "is not selected by -lazy-init"
 
 // Option narrows which of a busybox's packages a Plan defers.
 type Option func(*Plan)
 
-// DeferOnly defers the packages named by paths and the packages that import
-// them, and nothing else.
+// DeferOnly defers the packages the patterns select and the packages that
+// import them, and nothing else.
 //
 // Without it a Plan defers everything it can, which is the question "what
 // could this busybox recover". DeferOnly is the answer to the different
 // question a build asks: which packages is this build moving. The patterns
-// are the dial, and a package named by them gives up its package-level
+// are the dial, and a package they select gives up its package-level
 // variables and its init together.
 //
-// Paths are whole import paths. Reaching a subtree is step 5 of #165 and is
-// deliberately not here: the point of the first landing is that the blast
-// radius is one package of our choosing.
+// A pattern is a whole import path, or a path holding "..." to reach a
+// subtree. Matching says which packages one selects.
 //
-// A path that names no package in this busybox, or one that is eager for a
-// reason of its own, is ignored here rather than reported. Deferred says
-// which it was, so the caller can refuse a build whose -lazy-init did
-// nothing; a silent no-op is exactly the failure this work has to avoid.
+// A pattern that selects no package in this busybox, or only packages that
+// are eager for a reason of their own, is ignored here rather than reported.
+// Deferred says which it was, so the caller can refuse a build whose
+// -lazy-init did nothing; a silent no-op is exactly the failure this work has
+// to avoid.
 //
 // # Why the importers come too
 //
 // An eager package initializes before any deferred one, so it may not import
 // one. Naming a package therefore defers every package that can reach it, not
-// just the one named. That closure can never meet a package that has to stay
-// eager: the eager set New computes is already closed downward, so a package
-// importing a deferrable one is deferrable itself.
-func DeferOnly(paths []string) Option {
+// just the one selected. That closure can never meet a package that has to
+// stay eager: the eager set New computes is already closed downward, so a
+// package importing a deferrable one is deferrable itself.
+func DeferOnly(patterns []string) Option {
 	return func(p *Plan) {
 		deferred := map[string]bool{}
 		importers := p.importers()
-		for _, path := range paths {
-			if !p.Deferred(path) {
-				continue
+		for _, pattern := range patterns {
+			for _, path := range p.Matching(pattern) {
+				if !p.Deferred(path) {
+					continue
+				}
+				markImporters(path, importers, deferred)
 			}
-			markImporters(path, importers, deferred)
 		}
 
 		for path := range p.pkgs {
@@ -54,7 +56,7 @@ func DeferOnly(paths []string) Option {
 			if deferred[path] || p.Eager(path) || p.isCommand(path) {
 				continue
 			}
-			p.eager[path] = eagerNotNamed
+			p.eager[path] = eagerNotSelected
 		}
 	}
 }
