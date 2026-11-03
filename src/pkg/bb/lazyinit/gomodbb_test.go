@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/u-root/gobusybox/src/pkg/golang"
@@ -79,7 +80,11 @@ var V = "withasm" + beneath.V
 		// other host and take the closure assertions below with it.
 		// Measured on Go 1.27: with the _amd64 suffix go list reports
 		// SFiles=[] for arm64, arm and riscv64.
-		"pkg/withasm/empty.s": "// This file exists so that go list reports an assembly file.\n",
+		// Assembly that reads a Go symbol it does not define, which is
+		// one of the two shapes that still refuse. A file holding only
+		// a comment reaches nothing and is deferred, so it would stop
+		// standing for a refused package.
+		"pkg/withasm/empty.s": "TEXT \u00b7f(SB),$0\n\tMOVQ \u00b7V(SB), AX\n\tRET\n",
 		"pkg/beneath/beneath.go": `package beneath
 
 var V = "beneath"
@@ -212,8 +217,8 @@ func TestDecidesInGomodbbResolutionContext(t *testing.T) {
 		// The two refusals have to survive the resolution context, because
 		// this is the only place the files come from a directory the build
 		// may not write to.
-		if got := p.EagerReason("example.com/testmod/pkg/withasm"); got != refusedAssembly {
-			t.Errorf("withasm eager reason = %q, want %q", got, refusedAssembly)
+		if got := p.EagerReason("example.com/testmod/pkg/withasm"); !strings.Contains(got, "assembly file reading") {
+			t.Errorf("withasm eager reason = %q, want the reason its assembly gives", got)
 		}
 		if got := p.EagerReason("example.com/testmod/pkg/puller"); got != refusedLinkname {
 			t.Errorf("puller eager reason = %q, want %q", got, refusedLinkname)
@@ -449,10 +454,11 @@ func TestTheFixtureRefusesOnEveryArchitecture(t *testing.T) {
 
 	p := New(pkgs)
 
-	if got := p.EagerReason("example.com/testmod/pkg/withasm"); got != refusedAssembly {
-		t.Errorf("GOARCH=%s: withasm eager reason = %q, want %q -- its assembly file "+
-			"is excluded by a build constraint on this architecture, so the fixture "+
-			"stops standing for a refused package", foreign, got, refusedAssembly)
+	if got := p.EagerReason("example.com/testmod/pkg/withasm"); !strings.Contains(got, "assembly file reading") {
+		t.Errorf("GOARCH=%s: withasm eager reason = %q, want the reason its assembly "+
+			"gives -- the file is excluded by a build constraint on this "+
+			"architecture, so the fixture stops standing for a refused package",
+			foreign, got)
 	}
 	if !p.Eager("example.com/testmod/pkg/beneath") {
 		t.Errorf("GOARCH=%s: beneath is lazy, but the refused withasm imports it", foreign)

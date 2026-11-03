@@ -6,6 +6,8 @@ package bb
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,9 +45,18 @@ func lib(path string) *packages.Package {
 }
 
 // withAsm refuses laziness the way a real package does, by carrying an
-// assembly file that can bind a symbol here from somewhere else.
-func withAsm(p *packages.Package) *packages.Package {
-	p.OtherFiles = append(p.OtherFiles, "empty.s")
+// assembly file that reads a Go symbol it does not define.
+//
+// The file is written out, because the scan reads it. Naming one that is not
+// there refuses too, but for the wrong reason, and the message says so.
+func withAsm(t *testing.T, p *packages.Package) *packages.Package {
+	t.Helper()
+
+	file := filepath.Join(t.TempDir(), "asm.s")
+	if err := os.WriteFile(file, []byte("TEXT \u00b7f(SB),$0\n\tMOVQ \u00b7V(SB), AX\n\tRET\n"), 0o644); err != nil {
+		t.Fatalf("Could not write the assembly fixture: %v", err)
+	}
+	p.OtherFiles = append(p.OtherFiles, file)
 	return p
 }
 
@@ -69,10 +80,10 @@ func TestAnExactPathThatCannotBeDeferredFailsTheBuild(t *testing.T) {
 	}{
 		{"a path that is not here", "example.com/m/pkg/absent", "is not imported by any command in this busybox"},
 		{"a command", "example.com/m/cmd/one", "is a command"},
-		{"a package that refuses", "example.com/m/pkg/asm", "has an assembly file"},
+		{"a package that refuses", "example.com/m/pkg/asm", "has an assembly file reading"},
 	} {
 		t.Run(tt.desc, func(t *testing.T) {
-			cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
+			cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
 
 			r := &recorder{}
 			_, err := planInit(r, cmds, []string{tt.path})
@@ -92,7 +103,7 @@ func TestAnExactPathThatCannotBeDeferredFailsTheBuild(t *testing.T) {
 // A pattern is a request for whatever a subtree can give, so one package
 // refusing does not fail the build. It is reported instead.
 func TestAPatternDefersWhatItCanAndReportsTheRest(t *testing.T) {
-	cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
+	cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
 
 	r := &recorder{}
 	plan, err := planInit(r, cmds, []string{"example.com/m/pkg/..."})
@@ -110,7 +121,7 @@ func TestAPatternDefersWhatItCanAndReportsTheRest(t *testing.T) {
 	if !strings.Contains(report, "example.com/m/pkg/asm") {
 		t.Errorf("report = %q, want it to name the package left behind", report)
 	}
-	if !strings.Contains(report, "has an assembly file") {
+	if !strings.Contains(report, "has an assembly file reading") {
 		t.Errorf("report = %q, want it to give the reason", report)
 	}
 	if strings.Contains(report, "example.com/m/pkg/ok") {
@@ -131,7 +142,7 @@ func TestAPatternThatMovesNothingFailsTheBuild(t *testing.T) {
 		{"a subtree whose packages all refuse", "example.com/m/pkg/...", "can defer none of them"},
 	} {
 		t.Run(tt.desc, func(t *testing.T) {
-			cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")))
+			cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")))
 
 			r := &recorder{}
 			_, err := planInit(r, cmds, []string{tt.pattern})
@@ -151,14 +162,14 @@ func TestAPatternThatMovesNothingFailsTheBuild(t *testing.T) {
 // The refusal says which packages the pattern found as well as that it found
 // none it could move, because the next question is always which ones.
 func TestAPatternThatMovesNothingNamesWhatItFound(t *testing.T) {
-	cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")))
+	cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")))
 
 	r := &recorder{}
 	_, err := planInit(r, cmds, []string{"example.com/m/pkg/..."})
 	if err == nil {
 		t.Fatal("planInit succeeded, want an error")
 	}
-	if !strings.Contains(err.Error(), "example.com/m/pkg/asm has an assembly file") {
+	if !strings.Contains(err.Error(), "example.com/m/pkg/asm has an assembly file reading") {
 		t.Errorf("error = %q, want it to name the package and its reason", err)
 	}
 }
@@ -172,8 +183,8 @@ func TestAPatternThatMovesNothingNamesWhatItFound(t *testing.T) {
 // "pkg/sub has", so the summary lands between its own two packages.
 func TestARefusedPatternKeepsItsPackagesUnderIt(t *testing.T) {
 	cmds := command("example.com/m/cmd/one",
-		withAsm(lib("example.com/m/pkg")),
-		withAsm(lib("example.com/m/pkg/sub")))
+		withAsm(t, lib("example.com/m/pkg")),
+		withAsm(t, lib("example.com/m/pkg/sub")))
 
 	r := &recorder{}
 	_, err := planInit(r, cmds, []string{"example.com/m/pkg/..."})
@@ -182,8 +193,8 @@ func TestARefusedPatternKeepsItsPackagesUnderIt(t *testing.T) {
 	}
 	want := "cannot defer the initialization of:\n" +
 		"\texample.com/m/pkg/... matches 2 library(s) and can defer none of them\n" +
-		"\t\texample.com/m/pkg has an assembly file\n" +
-		"\t\texample.com/m/pkg/sub has an assembly file"
+		"\t\texample.com/m/pkg has an assembly file reading \u00b7V\n" +
+		"\t\texample.com/m/pkg/sub has an assembly file reading \u00b7V"
 	if got := err.Error(); got != want {
 		t.Errorf("error is\n%s\nwant\n%s", got, want)
 	}
@@ -192,7 +203,7 @@ func TestARefusedPatternKeepsItsPackagesUnderIt(t *testing.T) {
 // One pattern given twice is refused once. The refusals are what the build
 // failed on, and the same text twice reads like two separate problems.
 func TestOnePatternGivenTwiceIsRefusedOnce(t *testing.T) {
-	cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")))
+	cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")))
 
 	r := &recorder{}
 	_, err := planInit(r, cmds, []string{"example.com/m/pkg/...", "example.com/m/pkg/..."})
@@ -238,7 +249,7 @@ func TestAPatternWithNothingLeftBehindReportsNothing(t *testing.T) {
 // Two patterns reaching one refused package report it once. The report is
 // read by a person, and the same line twice reads like two packages.
 func TestTwoPatternsReportARefusalOnce(t *testing.T) {
-	cmds := command("example.com/m/cmd/one", withAsm(lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
+	cmds := command("example.com/m/cmd/one", withAsm(t, lib("example.com/m/pkg/asm")), lib("example.com/m/pkg/ok"))
 
 	r := &recorder{}
 	if _, err := planInit(r, cmds, []string{"example.com/m/pkg/...", "example.com/..."}); err != nil {

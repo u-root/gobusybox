@@ -107,7 +107,8 @@ any command is dispatched, rather than when a command that imports them is.
 It is a closure, not a per-package decision: an eager package initializes
 before every deferred one, so everything an eager package imports is eager
 too. Standard library packages are always in it, as are packages carrying
-`//go:linkname`, an assembly file or a `.syso` object, packages whose hoisted
+`//go:linkname` or a `.syso` object, packages whose assembly reads a Go symbol
+it does not define or names another package, packages whose hoisted
 variables would have a type they cannot name, and the packages a two-argument
 `//go:linkname` names. A command is never in it, being rewritten whatever its
 own source carries. Decided by `lazyinit.Plan`, which reports membership

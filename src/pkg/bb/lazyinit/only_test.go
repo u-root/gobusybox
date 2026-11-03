@@ -171,7 +171,7 @@ func TestNarrowingNeverCallsACommandEager(t *testing.T) {
 // one that cannot be deferred". Both are refusals and they need different
 // messages.
 func TestDeferredSeparatesAbsentFromEager(t *testing.T) {
-	refused := withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"), "/x/a.s")
+	refused := withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState)
 	cmd := imports(plain(t, "example.com/m/cmd"), refused)
 
 	p := New([]*packages.Package{cmd}, DeferOnly([]string{"example.com/m/refused"}))
@@ -195,7 +195,7 @@ func TestDeferredSeparatesAbsentFromEager(t *testing.T) {
 // importers instead. The importers come up only behind a package that
 // actually moved.
 func TestDeferOnlyARefusedPackageMovesNothing(t *testing.T) {
-	refused := withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"), "/x/a.s")
+	refused := withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState)
 	middle := imports(plain(t, "example.com/m/middle"), refused)
 	cmd := imports(plain(t, "example.com/m/cmd"), middle)
 
@@ -241,7 +241,7 @@ func TestNamingACommandIsRefused(t *testing.T) {
 // The three refusals read differently because they send the reader somewhere
 // different: a typo, a misunderstanding of the flag, or a rule doing its job.
 func TestCannotDeferSaysWhich(t *testing.T) {
-	refused := withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"), "/x/a.s")
+	refused := withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState)
 	lib := plain(t, "example.com/m/lib")
 	cmd := imports(plain(t, "example.com/m/cmd"), refused, lib)
 
@@ -280,7 +280,7 @@ func TestCannotDeferSaysWhich(t *testing.T) {
 func TestARefusedCommandDoesNotDragItsLibrariesEager(t *testing.T) {
 	deep := plain(t, "example.com/m/pkg/deep")
 	mid := imports(plain(t, "example.com/m/pkg/mid"), deep)
-	cmd := imports(withOtherFiles(pkg(t, "example.com/m/cmd/c", "package main\n"), "/x/a.s"), mid)
+	cmd := imports(withAsm(t, pkg(t, "example.com/m/cmd/c", "package main\n"), asmReachesPackageState), mid)
 
 	p := New([]*packages.Package{cmd})
 

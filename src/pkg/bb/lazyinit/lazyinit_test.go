@@ -7,6 +7,8 @@ package lazyinit
 import (
 	"go/parser"
 	"go/token"
+	"os"
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -62,6 +64,30 @@ func withOtherFiles(p *packages.Package, files ...string) *packages.Package {
 	return p
 }
 
+// asmReachesPackageState is assembly that reads a Go symbol it does not
+// define, which is one of the two shapes that keep a package eager.
+const asmReachesPackageState = "TEXT \u00b7f(SB),$0\n\tMOVQ \u00b7V(SB), AX\n\tRET\n"
+
+// asmSelfContained implements a Go function and reaches nothing else, which
+// is the shape that no longer refuses.
+const asmSelfContained = "#include \"textflag.h\"\n\nTEXT \u00b7f(SB),NOSPLIT,$0\n\tRET\n"
+
+// withAsm gives p an assembly file holding src, written where scan can read
+// it.
+//
+// A path to nothing would be refused for being unreadable rather than for
+// what the assembly does, which is a test passing for the wrong reason.
+func withAsm(t *testing.T, p *packages.Package, src string) *packages.Package {
+	t.Helper()
+
+	file := filepath.Join(t.TempDir(), "asm.s")
+	if err := os.WriteFile(file, []byte(src), 0o644); err != nil {
+		t.Fatalf("Could not write the assembly fixture: %v", err)
+	}
+	p.OtherFiles = append(p.OtherFiles, file)
+	return p
+}
+
 func TestScanRefusesLinknameAndAssembly(t *testing.T) {
 	for _, tt := range []struct {
 		name string
@@ -82,10 +108,10 @@ func F() {}
 			want: "",
 		},
 		{
-			name: "assembly file refuses",
-			pkg: withOtherFiles(pkg(t, "example.com/asm", `package asm
-`), "/tmp/example.com/asm/asm_linux_amd64.s"),
-			want: refusedAssembly,
+			name: "assembly reading a Go symbol refuses",
+			pkg: withAsm(t, pkg(t, "example.com/asm", `package asm
+`), asmReachesPackageState),
+			want: "has an assembly file reading " + middleDot + "V",
 		},
 		{
 			name: "non-assembly other files do not refuse",
