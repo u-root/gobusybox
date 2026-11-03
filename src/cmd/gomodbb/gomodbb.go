@@ -430,7 +430,7 @@ func mainPackages(env *golang.Environ, p pattern) ([]string, error) {
 }
 
 func main() {
-	flag.Var(&lazyInit, "lazy-init", "Import path of a library whose init runs for the commands that import it, rather than at program start. Repeatable. Experimental.")
+	flag.Var(&lazyInit, "lazy-init", "Import path of a library whose init runs for the commands that import it, rather than at program start. A trailing \"/...\" reaches a subtree. Repeatable. Experimental.")
 
 	bopts := &golang.BuildOpts{}
 	bopts.RegisterFlags(flag.CommandLine)
