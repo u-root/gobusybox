@@ -105,16 +105,43 @@ decided one package at a time. Standard library packages are never rewritten
 and are always eager, which is consistent because no standard library package
 imports a vendored one.
 
-Laziness is refused outright for any package carrying `//go:linkname`, an
-assembly file, or a `.syso` object. Each can bind a symbol in another package
-by name, so such a package can be rewritten cleanly, compile, and still
-misbehave, because something reaches its state by a path that is not in the
-import graph. A `.syso` is the same hazard as assembly with none of the source
-to read. The refusal is static and over-broad on purpose. Anything else that
+Laziness is refused outright for any package carrying `//go:linkname` or a
+`.syso` object. Each can bind a symbol in another package by name, so such a
+package can be rewritten cleanly, compile, and still misbehave, because
+something reaches its state by a path that is not in the import graph. A
+`.syso` is that hazard with no source to read at all. Anything else that
 defeats the rewrite falls back to eager and is reported at the end of the
 build, never silently.
 
-`.S` and `.sx` are assembly too and are deliberately absent from that list.
+Assembly is read rather than refused on sight. The hazard is real but narrow,
+and the original rule charged far more than it cost. An assembly file refuses
+laziness when it reads a Go symbol the file does not itself define, or when it
+names a symbol in another package. Everything else assembly does is reached by
+calling a function, which travels the import graph like any other call. When
+assembly names another package, that package becomes eager too, exactly as the
+target of a two-argument `//go:linkname` does, because refusing only the
+package holding the assembly would leave the one it reads into deferred and
+move the hazard rather than close it.
+
+The reading refuses unless the file is provably safe. The assembler has a
+preprocessor, so a `#define`, or an `#include` of a header the toolchain does
+not supply, keeps the package eager: a macro can put a symbol reference in a
+line that does not appear to hold one. An unreadable file keeps the package
+eager for the same reason. Being wrong in that direction costs laziness, and
+being wrong in the other costs correctness silently.
+
+Measured on a 116-command u-root busybox, which is the corpus this is meant
+for. Refusing every package carrying a `.s` file left **67** non-standard
+packages eager, of which only 21 carried anything at all: the other 46 came
+down with them through the closure, and a single package, a `kexec` trampoline
+whose assembly reaches nothing, accounted for 38. Reading the files instead
+leaves **24** eager and recovers **77%** of the busybox's `init` heap against
+50% before, with output and exit status unchanged across 15 commands and no
+package initializing that did not initialize before. Lifting the refusal
+altogether, which is not safe, would leave 16 eager and recover the same 77%,
+so the whole of what caution costs here is 5 packages and 192 bytes.
+
+`.S` and `.sx` are assembly too and are deliberately never read.
 go/packages reports them only for a package that uses cgo, which this never
 sees, because makebb disables cgo and gomodbb inherits that; measured on
 Go 1.27 with `CGO_ENABLED=1`, a package carrying `empty.S` and `empty.sx`

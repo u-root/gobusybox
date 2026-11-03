@@ -22,27 +22,16 @@ import (
 // to name what was found rather than what it implies, because the reader is
 // looking for it in their own source.
 const (
-	refusedAssembly = "has an assembly file"
 	refusedObject   = "has a .syso object file"
 	refusedLinkname = "has a //go:linkname directive"
 )
 
-// objectFileExts are the non-Go files that can define a symbol other code
-// binds to by name.
-//
-// .s is assembly. .syso is a precompiled object the linker takes whole, which
-// is the same hazard with none of the source to read.
-//
-// .S and .sx are assembly too, and are deliberately absent: go/packages
-// reports them in OtherFiles only for a package that uses cgo, which this
-// never sees, because makebb disables cgo and gomodbb inherits that. Measured
-// on Go 1.27 with CGO_ENABLED=1, a package carrying empty.S and empty.sx
-// reports OtherFiles=[] for both. Listing them would be a check that cannot
-// fire rather than a guard.
-var objectFileExts = map[string]string{
-	".s":    refusedAssembly,
-	".syso": refusedObject,
-}
+// .S and .sx are assembly too, and are deliberately not looked at:
+// go/packages reports them in OtherFiles only for a package that uses cgo,
+// which this never sees, because makebb disables cgo and gomodbb inherits
+// that. Measured on Go 1.27 with CGO_ENABLED=1, a package carrying empty.S
+// and empty.sx reports OtherFiles=[] for both. Reading them would be a check
+// that cannot fire rather than a guard.
 
 // scanResult is what one package's own source says about deferring its
 // initialization.
@@ -57,6 +46,14 @@ type scanResult struct {
 	// otherwise reach. Plan.linknameTarget turns a symbol into the package
 	// that holds it.
 	linknameSymbols []string
+	// asmSymbols are the remote symbols this package's assembly names,
+	// with the assembler's middle dot and division slash turned back into
+	// "." and "/". Like linknameSymbols they are edges the import graph
+	// does not have, and for the same reason they are collected even when
+	// this package is already refused: it is the target the closure cannot
+	// otherwise reach. Plan.linknameTarget turns a symbol into the package
+	// that holds it, which is the same question for both.
+	asmSymbols []string
 }
 
 // scan reads one package's files for the two things that let another package
@@ -76,11 +73,23 @@ func scan(p *packages.Package) scanResult {
 		r.refusal = refusedUnnameableType
 	}
 
+	// A .syso is refused outright, being a precompiled object with no
+	// source to read. Assembly is judged by what it does, because refusing
+	// every package carrying a .s file costs far more than the hazard it
+	// guards against. See ADR 0004.
 	for _, f := range p.OtherFiles {
-		if reason, ok := objectFileExts[path.Ext(f)]; ok {
-			r.refusal = reason
+		if path.Ext(f) == ".syso" {
+			r.refusal = refusedObject
 			break
 		}
+	}
+	// Read the assembly even when the package is already refused. The
+	// symbols are about the packages it *names*, which nothing else
+	// reaches, so skipping the scan would leave them deferred.
+	refusal, symbols := asmScan(p.OtherFiles)
+	r.asmSymbols = symbols
+	if r.refusal == "" {
+		r.refusal = refusal
 	}
 
 	for _, f := range p.Syntax {

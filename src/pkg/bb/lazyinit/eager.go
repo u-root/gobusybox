@@ -5,6 +5,7 @@
 package lazyinit
 
 import (
+	"maps"
 	"slices"
 
 	"golang.org/x/tools/go/packages"
@@ -14,6 +15,7 @@ import (
 const (
 	eagerStandardLibrary = "is a standard library package"
 	eagerLinknameTarget  = "is named by a //go:linkname directive in another package"
+	eagerAssemblyTarget  = "is named by an assembly file in another package"
 	eagerImportedByEager = "is imported by an eager package"
 )
 
@@ -57,7 +59,11 @@ func New(cmds []*packages.Package, opts ...Option) *Plan {
 	// its behalf -- that is an edge the import graph does not have, so the
 	// closure below could never reach the target from the puller.
 	roots := map[string]string{}
-	for path, pkg := range p.pkgs {
+	// In import path order. A target named by two packages keeps the
+	// first reason recorded for it, so iterating the map directly would
+	// make the reported reason depend on Go's randomized map order.
+	for _, path := range slices.Sorted(maps.Keys(p.pkgs)) {
+		pkg := p.pkgs[path]
 		if isStandardLibrary(pkg) {
 			roots[path] = eagerStandardLibrary
 			continue
@@ -80,6 +86,24 @@ func New(cmds []*packages.Package, opts ...Option) *Plan {
 		// else would initialize.
 		if s.refusal != "" && !p.isCommand(path) {
 			roots[path] = s.refusal
+		}
+		// An assembly file naming another package reaches it without an
+		// import edge, exactly as a two-argument //go:linkname does, so
+		// the target joins the roots the same way. Refusing only the
+		// package holding the assembly would leave the one it reads
+		// into deferred and move the hazard rather than close it.
+		for _, symbol := range s.asmSymbols {
+			// Resolved the same way a linkname symbol is, because
+			// it is the same question: which package owns this
+			// name. A target outside this busybox cannot be
+			// deferred by it anyway, so naming one is not an error.
+			target := p.linknameTarget(symbol)
+			if target == "" {
+				continue
+			}
+			if _, taken := roots[target]; !taken {
+				roots[target] = eagerAssemblyTarget
+			}
 		}
 		for _, symbol := range s.linknameSymbols {
 			// A target outside this busybox cannot be deferred by it

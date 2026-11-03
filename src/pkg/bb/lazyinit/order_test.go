@@ -26,8 +26,7 @@ func diamondCmd(t *testing.T) *packages.Package {
 	right := imports(plain(t, "example.com/m/right"), shared)
 	fmtPkg := stdlib(t, "fmt")
 	under := plain(t, "example.com/m/under")
-	refused := imports(withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"),
-		"/x/r.s"), under)
+	refused := imports(withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState), under)
 	return imports(plain(t, "example.com/m/cmd/a"), left, right, fmtPkg, refused)
 }
 
