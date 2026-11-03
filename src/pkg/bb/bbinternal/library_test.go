@@ -488,3 +488,182 @@ func unique(s []string) []string {
 	}
 	return out
 }
+
+// A comment in the part of a var declaration that hoisting moves must not
+// follow it into the generated function.
+//
+// go/printer places a file's comments by position. Hoisting moves the values
+// into functions built here, which have no position at all, so a comment is
+// emitted wherever its old position falls. It lands between a generated
+// function's name and its parameter list, and the result does not parse:
+//
+//	func busyboxInit1
+//	/* the point */() {
+//
+// What decides it is the comment's byte offset rather than the syntax it sits
+// in. The printer writes "busyboxInit1" counting from the variable's own
+// position, so a comment landing in those twelve bytes is flushed there.
+// Measured by padding the source: of the first 14 offsets after a variable,
+// 12 break the rewrite and the rest do not, with no composite literal
+// anywhere. A nested literal merely puts a comment in that window naturally,
+// which is why the packages this was first seen in all looked alike.
+//
+// The variable also has to be the last declaration in its file. Anything
+// after it has a position later than the comment's, so the printer flushes
+// the comment while printing that instead.
+func TestACommentInAHoistedVarDoesNotBreakTheRewrite(t *testing.T) {
+	for _, tt := range []struct {
+		name  string
+		decls string
+	}{
+		{
+			// The shape found in cloudflare/circl/dh/x25519.
+			"inside a nested composite literal",
+			`func First() byte { return V[0][0] }
+
+var V = [1][4]byte{
+	{ /* the point */
+		0x07, 0x00, 0x00, 0x00,
+	},
+}
+`,
+		},
+		{
+			// No literal at all, which is what shows the trigger
+			// is the offset rather than the composite literal.
+			"inside an arithmetic value",
+			`func First() int { return V }
+
+var V = 100000 +
+	/* c */ 2
+`,
+		},
+		{
+			// Between two values, so inside neither of them. The
+			// whole region after the names moves, not just the
+			// values.
+			"between two values of one spec",
+			`func First() int { return V + W }
+
+var V, W = 12345678,
+	/* c */ 2
+`,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := writeModule(t, map[string]string{
+				"go.mod":         "module example.com/m\n\ngo 1.21\n",
+				"cmd/c/main.go":  "package main\n\nimport \"example.com/m/pkg/lib\"\n\nfunc main() { println(lib.First()) }\n",
+				"pkg/lib/lib.go": "package lib\n\n" + tt.decls,
+			})
+
+			lib := NewLibrary(load(t, dir, "./pkg/lib"))
+			dest := filepath.Join(t.TempDir(), "out")
+			if err := lib.RewriteLibrary(dest, nil); err != nil {
+				t.Fatalf("RewriteLibrary: %v", err)
+			}
+
+			// That the file parses is the whole of what the
+			// printer got wrong.
+			src, err := os.ReadFile(filepath.Join(dest, "lib.go"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := parser.ParseFile(token.NewFileSet(), "lib.go", src, parser.ParseComments); err != nil {
+				t.Errorf("The rewritten source does not parse: %v\n%s", err, src)
+			}
+			if !strings.Contains(string(src), "V = ") {
+				t.Errorf("The rewrite lost the variable's value:\n%s", src)
+			}
+		})
+	}
+}
+
+// The same defect reaches a command, which Rewrite hoists the same way
+// whatever -lazy-init says. This is older than deferring a library's init and
+// needs no flag to reach.
+func TestACommentInsideACommandsHoistedValueDoesNotBreakTheRewrite(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod": "module example.com/m\n\ngo 1.21\n",
+		"cmd/c/main.go": `package main
+
+type Elt [4]byte
+
+func main() { println(points[0][0]) }
+
+var points = [1]Elt{
+	{ /* the point */
+		0x07, 0x00, 0x00, 0x00,
+	},
+}
+`,
+	})
+
+	cmd := NewPackage("c", load(t, dir, "./cmd/c"))
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := cmd.Rewrite(dest, "example.com/m/pkg/bbmain", nil); err != nil {
+		t.Fatalf("Rewrite: %v", err)
+	}
+	src, err := os.ReadFile(filepath.Join(dest, "main.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := parser.ParseFile(token.NewFileSet(), "main.go", src, parser.ParseComments); err != nil {
+		t.Errorf("The rewritten source does not parse: %v\n%s", err, src)
+	}
+}
+
+// Only the comments in the moved region are dropped. Everything else in the
+// file keeps them, which matters most for the //go: directives that change
+// what the compiler does.
+//
+// The trailing comment is the one the widened region could reach and must
+// not: it sits after the value, so hoisting leaves it where it was.
+func TestHoistingKeepsTheCommentsItDidNotMove(t *testing.T) {
+	dir := writeModule(t, map[string]string{
+		"go.mod":        "module example.com/m\n\ngo 1.21\n",
+		"cmd/c/main.go": "package main\n\nimport \"example.com/m/pkg/lib\"\n\nfunc main() { println(lib.First()) }\n",
+		"pkg/lib/lib.go": `package lib
+
+import "runtime"
+
+// Doc is the documentation of a function that is not moved.
+func Doc() int { return runtime.NumCPU() }
+
+//go:noinline
+func Directive() int { return 1 }
+
+func First() byte { return V[0][0] + Typed[0] }
+
+var Typed [4 /* inside the type, which stays */]byte = sized()
+
+func sized() [4]byte { return [4]byte{1, 2, 3, 4} }
+
+var V = [1][4]byte{
+	{ /* dropped: this one moves */
+		0x07, 0x00, 0x00, 0x00,
+	},
+} // Trailing sits after the value, so it stays.
+`,
+	})
+
+	lib := NewLibrary(load(t, dir, "./pkg/lib"))
+	dest := filepath.Join(t.TempDir(), "out")
+	if err := lib.RewriteLibrary(dest, nil); err != nil {
+		t.Fatalf("RewriteLibrary: %v", err)
+	}
+	src, err := os.ReadFile(filepath.Join(dest, "lib.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"// Doc is the documentation of a function that is not moved.",
+		"//go:noinline",
+		"// Trailing sits after the value, so it stays.",
+		"/* inside the type, which stays */",
+	} {
+		if !strings.Contains(string(src), want) {
+			t.Errorf("The rewrite dropped %q, which is outside the moved region:\n%s", want, src)
+		}
+	}
+}

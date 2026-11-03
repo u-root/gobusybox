@@ -247,6 +247,38 @@ func (p *Package) addVarInit(f *ast.File, lhs []ast.Expr, value ast.Expr) {
 	f.Decls = append(f.Decls, varInit)
 }
 
+// dropComments removes the comment groups lying between from and to.
+//
+// go/printer interleaves a file's comments by position, so a comment whose
+// expression has moved is emitted wherever its old position falls, which for
+// a generated declaration with no position of its own is any token at all.
+// The ones in a moved region are the only comments the rewrite displaces, and
+// generated source is the one place losing them costs nothing.
+func dropComments(f *ast.File, from, to token.Pos) {
+	kept := f.Comments[:0]
+	for _, group := range f.Comments {
+		if group.Pos() >= from && group.End() <= to {
+			continue
+		}
+		kept = append(kept, group)
+	}
+	f.Comments = kept
+}
+
+// movedFrom is where the part of a var spec that hoisting takes away begins:
+// after the names, or after the type when the spec writes one.
+//
+// The = and every value after it move into the generated functions, so the
+// comments anywhere in that region are displaced, not only those inside one
+// value. A comment between two values of `var a, b = x, y` sits inside
+// neither.
+func movedFrom(s *ast.ValueSpec) token.Pos {
+	if s.Type != nil {
+		return s.Type.End()
+	}
+	return s.Names[len(s.Names)-1].End()
+}
+
 // importName finds the package path to import, given the go/types pkg path.
 //
 // E.g. go/types uses the fully vendored name of a package, such as
@@ -460,6 +492,14 @@ func (p *Package) rewriteFile(f *ast.File) bool {
 					specs = append(specs, s)
 					continue
 				}
+
+				// A comment in the region that moves keeps the
+				// position it had while the functions built
+				// for it have none, so go/printer can flush
+				// it between a function's name and its
+				// parameter list. Before s.Values is cleared,
+				// which is what s.End() reads.
+				dropComments(f, movedFrom(s), s.End())
 
 				// A var spec either gives one value per name,
 				// or one multi-valued expression for all of
