@@ -514,16 +514,30 @@ command being dispatched imports them. In the 120-command u-root busybox, of
 228 library packages, **none is reached by every command** and 125 are reached
 by exactly one.
 
-`-lazy-init` names a library whose initialization moves to the commands that
+`-lazy-init` selects a library whose initialization moves to the commands that
 import it. It is off by default and takes whole import paths, repeated:
 
 ```
 makebb -lazy-init github.com/org/repo/pkg/table ./cmds/sl ./cmds/cowsay
 ```
 
-A named package is rewritten like a command -- its package-level variables and
-its `init` bodies become numbered `busyboxInitN` functions -- except that it
-keeps its own package name and import path, and gains an exported hook in a
+A trailing `/...` reaches a whole subtree, as it does for the go command, and
+covers the subtree's root as well as everything under it:
+
+```
+makebb -lazy-init github.com/org/repo/pkg/... ./cmds/sl ./cmds/cowsay
+```
+
+The two forms differ in what a package that cannot be deferred does to the
+build. An exact path is a claim about one package, so a build that cannot keep
+it fails, naming the package and the reason. A pattern is a request for
+whatever the subtree can give, so it defers what it can and reports the rest,
+failing only if it moved nothing at all. Either way the build never quietly
+defers less than it was asked to.
+
+A selected package is rewritten like a command -- its package-level variables
+and its `init` bodies become numbered `busyboxInitN` functions -- except that
+it keeps its own package name and import path, and gains an exported hook in a
 generated `bbinit.go`:
 
 ```go

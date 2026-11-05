@@ -169,20 +169,20 @@ type Opts struct {
 	// like Tamago which have their own way of building.
 	GenerateOnly bool
 
-	// LazyInit names the library packages whose initialization is deferred
-	// to the commands that import them, by whole import path.
+	// LazyInit selects the library packages whose initialization is
+	// deferred to the commands that import them. Each entry is a whole
+	// import path, or a path holding "..." to reach a subtree.
 	//
 	// Empty means every package initializes at program start, as it always
-	// has, and nothing below the command level is rewritten. A package
-	// named here gives up its package-level variables and its init
-	// together, and so does every package that imports it: an eager
-	// package initializes before any deferred one and so may not import
-	// one.
+	// has, and nothing below the command level is rewritten. A selected
+	// package gives up its package-level variables and its init together,
+	// and so does every package that imports it: an eager package
+	// initializes before any deferred one and so may not import one.
 	//
-	// A path naming no package in the busybox, or one that cannot be
-	// deferred, fails the build rather than being skipped. Asking for
-	// laziness and silently not getting it is the failure this is hardest
-	// to notice.
+	// An exact path that cannot be deferred fails the build. A pattern
+	// defers what it can and reports the rest, failing only when it moved
+	// nothing. Either way, asking for laziness and silently not getting it
+	// is the failure this is hardest to notice.
 	LazyInit []string
 }
 
@@ -287,7 +287,7 @@ func BuildBusybox(l ulog.Logger, opts *Opts) (nerr error) {
 
 	// Which packages wait for a command that imports them, and which
 	// initialize at program start as they always have.
-	plan, err := planInit(cmds, opts.LazyInit)
+	plan, err := planInit(l, cmds, opts.LazyInit)
 	if err != nil {
 		return err
 	}

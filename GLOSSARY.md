@@ -55,7 +55,7 @@ _Avoid_: shebang, hashbang
 The source-to-source transformation that turns a command into an importable
 package with no global side effects. Every command is rewritten, by
 `bbinternal.Package.Rewrite`. A library is rewritten only when `-lazy-init`
-names it or something it imports, by `bbinternal.Package.RewriteLibrary`,
+selects it or something it imports, by `bbinternal.Package.RewriteLibrary`,
 which keeps the package's own name and import path and gives it a hook; every
 other package they import is copied without rewriting, re-emitted from its own
 syntax tree, and only for the files that survive the build constraints.
@@ -111,8 +111,9 @@ too. Standard library packages are always in it, as are packages carrying
 variables would have a type they cannot name, and the packages a two-argument
 `//go:linkname` names. A command is never in it, being rewritten whatever its
 own source carries. Decided by `lazyinit.Plan`, which reports membership
-through `Eager`, the reason through `EagerReason`, and why a named package
-will not move through `CannotDefer`.
+through `Eager`, the reason through `EagerReason`, which packages a pattern
+selects through `Matching`, and why a selected package will not move through
+`CannotDefer`.
 _Avoid_: eager flag, eager list, non-lazy set
 
 **Registry**:
@@ -179,8 +180,12 @@ built, not *how*. The type is `findpkg.Env`, carried as `Opts.LookupEnv`.
 _Avoid_: env, build environment
 
 **Pattern**:
-One user-supplied argument naming commands. It may be a file system path, a Go
-package path, a glob of either, or an exclusion.
+One user-supplied argument selecting packages. A command pattern names what to
+build, and may be a file system path, a Go package path, a glob of either, or
+an exclusion. A `-lazy-init` pattern names what to defer, and is a whole
+import path or one holding `...` to reach a subtree. The two languages are not
+the same, and `findpkg.IsGlob` and `lazyinit.IsPattern` are where each is
+decided.
 _Avoid_: arg, target, spec
 
 **Exclusion**:

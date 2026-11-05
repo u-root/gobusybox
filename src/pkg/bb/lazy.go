@@ -7,6 +7,7 @@ package bb
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"sort"
 
 	"golang.org/x/tools/go/packages"
@@ -34,11 +35,11 @@ func init() {
 
 // planInit decides which packages initialize at program start.
 //
-// It returns nil when nothing was named, which is the ordinary build: no
+// It returns nil when no pattern was given, which is the ordinary build: no
 // library is rewritten, and the generated tree is what it was before this
 // existed.
-func planInit(cmds []*bbinternal.Package, named []string) (*lazyinit.Plan, error) {
-	if len(named) == 0 {
+func planInit(l ulog.Logger, cmds []*bbinternal.Package, patterns []string) (*lazyinit.Plan, error) {
+	if len(patterns) == 0 {
 		return nil, nil
 	}
 
@@ -46,23 +47,78 @@ func planInit(cmds []*bbinternal.Package, named []string) (*lazyinit.Plan, error
 	for _, cmd := range cmds {
 		pkgs = append(pkgs, cmd.Pkg)
 	}
-	plan := lazyinit.New(pkgs, lazyinit.DeferOnly(named))
+	plan := lazyinit.New(pkgs, lazyinit.DeferOnly(patterns))
 
-	// A name that did not take is an error rather than a warning. The
-	// whole point of naming packages one at a time is to know which ones
-	// moved, and a build that quietly deferred nothing would pass every
-	// check this has.
-	var refused []string
-	for _, path := range named {
-		if why := plan.CannotDefer(path); why != "" {
-			refused = append(refused, fmt.Sprintf("%s %s", path, why))
+	var refused, skipped []string
+	for _, pattern := range patterns {
+		if !lazyinit.IsPattern(pattern) {
+			// An exact path is a claim about one package, so a
+			// build that cannot keep it is an error. Asking for
+			// laziness and silently not getting it is the failure
+			// this is hardest to notice.
+			if why := plan.CannotDefer(pattern); why != "" {
+				refused = append(refused, fmt.Sprintf("%s %s", pattern, why))
+			}
+			continue
+		}
+
+		// A pattern is a request for whatever a subtree can give, so
+		// it defers what it can and says what it could not. It still
+		// has to move something: a pattern that moved nothing leaves
+		// the same silent no-op behind.
+		matched := plan.Matching(pattern)
+		var moved int
+		var why []string
+		for _, path := range matched {
+			if plan.Deferred(path) {
+				moved++
+				continue
+			}
+			why = append(why, fmt.Sprintf("%s %s", path, plan.CannotDefer(path)))
+		}
+		switch {
+		case len(matched) == 0:
+			refused = append(refused, fmt.Sprintf("%s matches no library in this busybox", pattern))
+		case moved == 0:
+			refused = append(refused, under(fmt.Sprintf("%s matches %d library(s) and can defer none of them", pattern, len(matched)), why))
+		default:
+			skipped = append(skipped, why...)
 		}
 	}
 	if len(refused) > 0 {
 		sort.Strings(refused)
+		refused = slices.Compact(refused)
 		return nil, fmt.Errorf("cannot defer the initialization of:\n\t%s", joinLines(refused))
 	}
+	reportSkipped(l, skipped)
 	return plan, nil
+}
+
+// reportSkipped says which packages a pattern selected and could not move,
+// because the build goes ahead without them and nothing else would say so.
+func reportSkipped(l ulog.Logger, skipped []string) {
+	if len(skipped) == 0 {
+		return
+	}
+	sort.Strings(skipped)
+	skipped = slices.Compact(skipped)
+	l.Printf("Left %d package(s) matched by -lazy-init initializing at program start:", len(skipped))
+	for _, line := range skipped {
+		l.Printf("\t%s", line)
+	}
+}
+
+// under gathers a pattern's refusal into one entry, indenting the packages it
+// found under the pattern that found them.
+//
+// One entry, because the refusals are sorted: a pattern's packages sort around
+// its own summary line rather than under it, and a /... pattern matching its
+// subtree's root puts that root above the summary every time.
+func under(header string, why []string) string {
+	for _, line := range why {
+		header += "\n\t\t" + line
+	}
+	return header
 }
 
 // joinLines renders one refusal per line, indented to line up under the
