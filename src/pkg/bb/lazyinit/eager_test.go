@@ -6,6 +6,7 @@ package lazyinit
 
 import (
 	"slices"
+	"strings"
 	"testing"
 
 	"golang.org/x/tools/go/packages"
@@ -57,8 +58,7 @@ func TestEagerSetIsClosedDownwardUnderImports(t *testing.T) {
 	mid := imports(plain(t, "example.com/m/mid"), bottom)
 	top := imports(plain(t, "example.com/m/top"), mid)
 	undertow := plain(t, "example.com/m/undertow")
-	refused := imports(withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"),
-		"/x/asm_linux_amd64.s"), undertow)
+	refused := imports(withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState), undertow)
 	fmtPkg := stdlib(t, "fmt")
 	cmd := imports(plain(t, "example.com/m/cmd/a"), top, refused, fmtPkg)
 
@@ -116,7 +116,7 @@ func eagerOverChain(t *testing.T) *packages.Package {
 	t.Helper()
 	c := plain(t, "example.com/m/c")
 	b := imports(plain(t, "example.com/m/b"), c)
-	a := imports(withOtherFiles(pkg(t, "example.com/m/a", "package p\n"), "/x/a.s"), b)
+	a := imports(withAsm(t, pkg(t, "example.com/m/a", "package p\n"), asmReachesPackageState), b)
 	return imports(plain(t, "example.com/m/cmd"), a)
 }
 
@@ -126,7 +126,7 @@ func eagerOverChain(t *testing.T) *packages.Package {
 func eagerDiamond(t *testing.T) *packages.Package {
 	t.Helper()
 	shared := plain(t, "example.com/m/shared")
-	left := imports(withOtherFiles(pkg(t, "example.com/m/left", "package p\n"), "/x/l.s"), shared)
+	left := imports(withAsm(t, pkg(t, "example.com/m/left", "package p\n"), asmReachesPackageState), shared)
 	right := imports(plain(t, "example.com/m/right"), shared)
 	return imports(plain(t, "example.com/m/cmd"), left, right)
 }
@@ -209,9 +209,9 @@ func TestEagerReasonDoesNotDependOnMapOrder(t *testing.T) {
 		a := imports(stdlib(t, "fmt"), b)
 		// And a refusal below an eager package, which must blame its
 		// own assembly rather than the importer.
-		refused := withOtherFiles(pkg(t, "example.com/m/refused", "package p\n"), "/x/r.s")
+		refused := withAsm(t, pkg(t, "example.com/m/refused", "package p\n"), asmReachesPackageState)
 		mid := imports(plain(t, "example.com/m/mid"), refused)
-		eagerAbove := imports(withOtherFiles(pkg(t, "example.com/m/above", "package p\n"), "/x/a.s"), mid)
+		eagerAbove := imports(withAsm(t, pkg(t, "example.com/m/above", "package p\n"), asmReachesPackageState), mid)
 		cmd := imports(plain(t, "example.com/m/cmd"), a, eagerAbove)
 
 		p := New([]*packages.Package{cmd})
@@ -221,8 +221,8 @@ func TestEagerReasonDoesNotDependOnMapOrder(t *testing.T) {
 				t.Fatalf("run %d: EagerReason(%q) = %q, want %q", i, path, got, eagerStandardLibrary)
 			}
 		}
-		if got := p.EagerReason("example.com/m/refused"); got != refusedAssembly {
-			t.Fatalf("run %d: EagerReason(refused) = %q, want %q", i, got, refusedAssembly)
+		if got := p.EagerReason("example.com/m/refused"); !strings.Contains(got, "assembly file reading") {
+			t.Fatalf("run %d: EagerReason(refused) = %q, want the reason its own assembly gives", i, got)
 		}
 		// The one that genuinely is eager only by import keeps saying so.
 		if got := p.EagerReason("example.com/m/mid"); got != eagerImportedByEager {
@@ -444,5 +444,138 @@ func mine()
 				t.Errorf("EagerReason(puller) = %q, want %q", got, refusedLinkname)
 			}
 		})
+	}
+}
+
+// An assembly file naming another package makes that package eager, the same
+// way a two-argument //go:linkname does.
+//
+// Refusing only the package holding the assembly would move the hazard rather
+// than close it: the puller would be eager and the package its assembly reads
+// into would still be deferred, so the read would land on a package whose
+// hook had not run. Nothing imports the victim here, so the downward closure
+// cannot reach it either.
+func TestAnAssemblyTargetJoinsTheEagerRoots(t *testing.T) {
+	victimDep := plain(t, "example.com/m/victimdep")
+	victim := imports(plain(t, "example.com/m/victim"), victimDep)
+	puller := withAsm(t, pkg(t, "example.com/m/puller", "package p\n"),
+		"TEXT \u00b7f(SB),$0\n\tCALL "+asmSym("example.com/m/victim.Ready")+"(SB)\n\tRET\n")
+	cmd := imports(plain(t, "example.com/m/cmd"), puller, victim)
+
+	p := New([]*packages.Package{cmd})
+
+	for _, want := range []string{"example.com/m/victim", "example.com/m/victimdep"} {
+		if !p.Eager(want) {
+			t.Errorf("Eager(%q) = false, want true (named by another package's assembly)", want)
+		}
+	}
+	if got := p.EagerReason("example.com/m/victim"); got != eagerAssemblyTarget {
+		t.Errorf("EagerReason(victim) = %q, want %q", got, eagerAssemblyTarget)
+	}
+	if !p.Eager("example.com/m/puller") {
+		t.Error("the package whose assembly names another is not eager itself")
+	}
+}
+
+// A package whose assembly reaches nothing is deferred, which is the whole
+// point of reading the file rather than refusing on its extension.
+func TestSelfContainedAssemblyDoesNotRefuse(t *testing.T) {
+	lib := withAsm(t, pkg(t, "example.com/m/lib", "package p\n"), asmSelfContained)
+	cmd := imports(plain(t, "example.com/m/cmd"), lib)
+
+	p := New([]*packages.Package{cmd})
+
+	if p.Eager("example.com/m/lib") {
+		t.Errorf("a package whose assembly only implements its own functions is eager: %q",
+			p.EagerReason("example.com/m/lib"))
+	}
+}
+
+// asmSym writes a Go symbol the way assembly has to spell it. The assembler
+// rejects ASCII ".", "/" and "-" inside an identifier, so a fixture using
+// them is testing a file the toolchain would never accept -- which is how a
+// scanner that only understood the ASCII form went unnoticed.
+func asmSym(name string) string {
+	return strings.NewReplacer(".", "\u00b7", "/", "\u2215").Replace(name)
+}
+
+// The fixtures above must be assembly the toolchain would accept, or they
+// prove nothing about what the scanner meets in a real package.
+func TestFixturesUseTheEncodingTheAssemblerRequires(t *testing.T) {
+	got := asmSym("example.com/m/victim.Ready")
+	if want := "example\u00b7com\u2215m\u2215victim\u00b7Ready"; got != want {
+		t.Errorf("asmSym = %q, want %q", got, want)
+	}
+	if strings.ContainsAny(got, "./") {
+		t.Errorf("asmSym left an ASCII . or / in %q, which the assembler rejects", got)
+	}
+}
+
+// An assembly symbol whose package is not in this busybox is ignored, the
+// same way a linkname target outside it is. Nothing here can defer it, so
+// naming it is not an error.
+func TestAssemblyTargetOutsideTheBusyboxIsIgnored(t *testing.T) {
+	puller := withAsm(t, pkg(t, "example.com/m/puller", "package p\n"),
+		"TEXT \u00b7f(SB),$0\n\tCALL "+asmSym("example.com/elsewhere/absent.Ready")+"(SB)\n\tRET\n")
+	cmd := imports(plain(t, "example.com/m/cmd"), puller)
+
+	p := New([]*packages.Package{cmd})
+
+	if p.Eager("example.com/elsewhere/absent") {
+		t.Error("a package that is not in the busybox was made eager")
+	}
+	// The puller still refuses on its own account.
+	if !p.Eager("example.com/m/puller") {
+		t.Error("the package whose assembly names another is not eager itself")
+	}
+}
+
+// A target named by two packages must get the same reason every run. The
+// roots are built by walking a map, and Go randomizes that order, so the
+// first reason recorded for a target would otherwise be a coin toss.
+func TestAnAssemblyTargetsReasonDoesNotDependOnMapOrder(t *testing.T) {
+	want := ""
+	for i := range 50 {
+		victim := plain(t, "example.com/m/victim")
+		byAsm := withAsm(t, pkg(t, "example.com/m/apuller", "package p\n"),
+			"TEXT \u00b7f(SB),$0\n\tCALL "+asmSym("example.com/m/victim.Ready")+"(SB)\n\tRET\n")
+		byLinkname := pkg(t, "example.com/m/zpuller", "package p\n\n//go:linkname mine example.com/m/victim.theirs\nfunc mine()\n")
+		cmd := imports(plain(t, "example.com/m/cmd"), byAsm, byLinkname, victim)
+
+		got := New([]*packages.Package{cmd}).EagerReason("example.com/m/victim")
+		if i == 0 {
+			want = got
+			continue
+		}
+		if got != want {
+			t.Fatalf("run %d: EagerReason(victim) = %q, run 0 said %q", i, got, want)
+		}
+	}
+}
+
+// A package refused for some other reason still has its assembly read, because
+// the symbols name packages nothing else reaches.
+//
+// A .syso refuses the package outright. Stopping there would leave the
+// package its assembly reads into deferred, which is the hazard this is
+// supposed to close, and it would be invisible: the puller is eager either
+// way, so only the victim's state tells the two apart.
+func TestAssemblyIsReadEvenWhenThePackageIsAlreadyRefused(t *testing.T) {
+	victim := plain(t, "example.com/m/victim")
+	puller := withOtherFiles(
+		withAsm(t, pkg(t, "example.com/m/puller", "package p\n"),
+			"TEXT \u00b7f(SB),$0\n\tCALL "+asmSym("example.com/m/victim.Ready")+"(SB)\n\tRET\n"),
+		"/x/blob.syso")
+	cmd := imports(plain(t, "example.com/m/cmd"), puller, victim)
+
+	p := New([]*packages.Package{cmd})
+
+	if !p.Eager("example.com/m/victim") {
+		t.Error("the package named by the assembly is deferred, because the scan stopped at the .syso")
+	}
+	// The .syso is the reason the puller itself is refused; the assembly
+	// reason must not overwrite it.
+	if got := p.EagerReason("example.com/m/puller"); !strings.Contains(got, "syso") {
+		t.Errorf("EagerReason(puller) = %q, want the .syso reason", got)
 	}
 }
