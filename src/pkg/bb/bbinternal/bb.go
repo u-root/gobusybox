@@ -776,6 +776,7 @@ func WritePkg(p *packages.Package, destDir string) error {
 	// The package directory, which all GoFiles share.
 	pkgDir := filepath.Dir(p.GoFiles[0])
 
+	written := writtenGoFiles(p.Fset, p.Syntax)
 	for _, fp := range p.EmbedFiles {
 		// pkg.go.dev/embed documentation: "The patterns are
 		// interpreted relative to the package directory containing the
@@ -790,6 +791,14 @@ func WritePkg(p *packages.Package, destDir string) error {
 		relPath, err := filepath.Rel(pkgDir, fp)
 		if err != nil {
 			return err
+		}
+		// A package may embed one of its own Go files, as
+		// golang.org/x/tools/go/analysis/passes/inline embeds doc.go.
+		// writeFiles writes those from p.Syntax, so copying the
+		// original here would only put a read-only module cache file
+		// where the rewritten one goes.
+		if written[relPath] {
+			continue
 		}
 		os.MkdirAll(filepath.Join(destDir, filepath.Dir(relPath)), 0755)
 		if err := cp.Copy(fp, filepath.Join(destDir, relPath)); err != nil {
@@ -811,6 +820,15 @@ func writeFiles(destDir string, fset *token.FileSet, files []*ast.File) error {
 		}
 	}
 	return nil
+}
+
+// writtenGoFiles returns the names writeFiles writes, relative to destDir.
+func writtenGoFiles(fset *token.FileSet, files []*ast.File) map[string]bool {
+	names := make(map[string]bool, len(files))
+	for _, file := range files {
+		names[filepath.Base(fset.File(file.Package).Name())] = true
+	}
+	return names
 }
 
 // Rewrite rewrites p into destDir as a bb package, rewriting its init and main
