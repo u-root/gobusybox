@@ -65,7 +65,7 @@ func (c Environ) GoCmd(gocmd string, args ...string) *exec.Cmd {
 // Returns a compiler command to be run in the environment.
 func (c Environ) compilerCmd(gocmd string, args ...string) *exec.Cmd {
 	goBin := c.Compiler.Path
-	if "" == goBin {
+	if goBin == "" {
 		goBin = filepath.Join(c.GOROOT, "bin", "go")
 	}
 	args = append([]string{gocmd}, args...)

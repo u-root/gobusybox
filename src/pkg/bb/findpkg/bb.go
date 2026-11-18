@@ -339,7 +339,7 @@ func IsGlob(s string) bool {
 // lookupPkgsWithGlob resolves globs in Go package paths to a realized list of
 // Go command paths. It may return a list that contains errors.
 //
-// Precondition: IsGlob(pattern) is true
+// Precondition: IsGlob(pattern) is true.
 func lookupPkgsWithGlob(env *golang.Environ, pattern string) ([]*packages.Package, error) {
 	elems := strings.Split(pattern, "/")
 

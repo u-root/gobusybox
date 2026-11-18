@@ -63,7 +63,7 @@ func (c *Environ) Copy(opts ...Opt) *Environ {
 func (c *Environ) RegisterFlags(f *flag.FlagSet) {
 	f.Var((*uflag.Strings)(&c.BuildTags), "go-build-tags", "Go build tags")
 	f.StringVar((*string)(&c.Mod), "go-mod", string(c.Mod), "Value of -mod to go commands (allowed: (empty), vendor, mod, readonly)")
-	f.StringVar((*string)(&c.Compiler.Path), "compiler", "",
+	f.StringVar(&c.Compiler.Path, "compiler", "",
 		"override go compiler used (e.g. \"/path/to/tinygo\")")
 }
 
